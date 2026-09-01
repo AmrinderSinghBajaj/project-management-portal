@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE } from '../config';
 
 function CustomDatePicker({ value, onChange }) {
@@ -14,7 +14,6 @@ function CustomDatePicker({ value, onChange }) {
 
   const formatUserDisplay = (dateStr) => {
     if (!dateStr) return 'Select Delivery Date';
-    // Format YYYY-MM-DD to display string
     const [y, m, d] = dateStr.split('-');
     const date = new Date(y, m - 1, d);
     return date.toLocaleDateString('en-US', { 
@@ -132,6 +131,204 @@ function CustomDatePicker({ value, onChange }) {
   );
 }
 
+function RoleMultiSelect({ role, availableUsers = [], selectedIds = [], onChange }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) {
+        setIsOpen(false);
+      }
+    };
+    if (isOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isOpen]);
+
+  const toggleUser = (userId) => {
+    if (selectedIds.includes(userId)) {
+      onChange(selectedIds.filter(id => id !== userId));
+    } else {
+      onChange([...selectedIds, userId]);
+    }
+  };
+
+  const handleSelectAll = (e) => {
+    e.stopPropagation();
+    onChange(availableUsers.map(u => u._id));
+  };
+
+  const handleClearAll = (e) => {
+    e.stopPropagation();
+    onChange([]);
+  };
+
+  const selectedUsers = availableUsers.filter(u => selectedIds.includes(u._id));
+  const filteredUsers = availableUsers.filter(u =>
+    u.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (u.email && u.email.toLowerCase().includes(searchTerm.toLowerCase()))
+  );
+
+  return (
+    <div ref={containerRef} style={styles.multiSelectContainer}>
+      <div
+        onClick={() => setIsOpen(!isOpen)}
+        style={{
+          ...styles.multiSelectTrigger,
+          borderColor: isOpen ? 'var(--accent-blue)' : 'rgba(15, 23, 42, 0.12)',
+          boxShadow: isOpen ? '0 0 0 2px rgba(30, 58, 138, 0.08)' : 'none',
+        }}
+      >
+        <div style={styles.triggerTextWrapper}>
+          {selectedUsers.length === 0 ? (
+            <span style={styles.placeholderText}>Select member...</span>
+          ) : (
+            <div style={styles.triggerSelectedSummary}>
+              <span style={styles.selectedNamesPreview}>
+                {selectedUsers.map(u => u.name).join(', ')}
+              </span>
+              <span style={styles.selectedCountBadge}>
+                {selectedUsers.length}
+              </span>
+            </div>
+          )}
+        </div>
+        <span style={styles.caret}>{isOpen ? '▲' : '▼'}</span>
+      </div>
+
+      {isOpen && (
+        <div style={styles.dropdownMenuCard} className="fade-in" onClick={(e) => e.stopPropagation()}>
+          {availableUsers.length > 3 && (
+            <div style={styles.searchBoxWrapper}>
+              <input
+                type="text"
+                placeholder={`Search ${role}...`}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={styles.searchBoxInput}
+                autoFocus
+              />
+            </div>
+          )}
+
+          {availableUsers.length > 1 && (
+            <div style={styles.bulkActionsRow}>
+              <button
+                type="button"
+                onClick={handleSelectAll}
+                style={styles.bulkActionButton}
+              >
+                Select All ({availableUsers.length})
+              </button>
+              <button
+                type="button"
+                onClick={handleClearAll}
+                style={styles.bulkActionButton}
+              >
+                Clear
+              </button>
+            </div>
+          )}
+
+          <div style={styles.optionsList}>
+            {availableUsers.length === 0 ? (
+              <div style={styles.emptyRoleNotice}>No members registered in this role</div>
+            ) : filteredUsers.length === 0 ? (
+              <div style={styles.emptyRoleNotice}>No members match "{searchTerm}"</div>
+            ) : (
+              filteredUsers.map(u => {
+                const isSelected = selectedIds.includes(u._id);
+                return (
+                  <div
+                    key={u._id}
+                    onClick={() => toggleUser(u._id)}
+                    style={{
+                      ...styles.userOptionItem,
+                      backgroundColor: isSelected ? 'rgba(30, 58, 138, 0.08)' : 'transparent',
+                    }}
+                    className="dropdown-option"
+                  >
+                    <div style={{
+                      ...styles.checkboxBox,
+                      backgroundColor: isSelected ? 'var(--accent-blue)' : '#ffffff',
+                      borderColor: isSelected ? 'var(--accent-blue)' : 'rgba(15, 23, 42, 0.25)',
+                    }}>
+                      {isSelected && <span style={styles.checkboxCheck}>✓</span>}
+                    </div>
+                    <div style={styles.userOptionTextGroup}>
+                      <span style={{
+                        ...styles.userOptionName,
+                        fontWeight: isSelected ? '600' : '400',
+                        color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)'
+                      }}>
+                        {u.name}
+                      </span>
+                      {u.email && (
+                        <span style={styles.userOptionEmail}>{u.email}</span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Selected Member Tag Pills for immediate visibility & fast removal */}
+      {selectedUsers.length > 0 && (
+        <div style={styles.selectedTagsRow}>
+          {selectedUsers.map(u => (
+            <span key={u._id} style={styles.selectedTagPill}>
+              <span style={styles.selectedTagLabel}>{u.name}</span>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleUser(u._id);
+                }}
+                style={styles.removeTagCross}
+                title={`Remove ${u.name}`}
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const ROLES_LIST = [
+  'Android Developer', 'iOS Developer', 'Flutter Developer', 'Python Developer',
+  'Full Stack Developer', 'Angular Developer', 'Frontend Designer', 'Backend Developer',
+  'Delivery Head', 'QA', 'BA', 'PC', 'Sales', 'PM', 'CEO', 'Developer', 'Designer', 'Product Owner'
+];
+
+const normalizeRoleName = (role) => {
+  if (!role) return 'Developer';
+  if (role === 'Quality Analyst (QA)' || role === 'QA') return 'QA';
+  if (role === 'Project Manager (PM)' || role === 'PM') return 'PM';
+  if (role === 'Business Analyst (BA)' || role === 'BA') return 'BA';
+  if (role === 'Project Coordinator (PC)' || role === 'PC') return 'PC';
+  if (role === 'Sales Rep' || role === 'Sales') return 'Sales';
+  return role;
+};
+
+const createEmptyAssignments = () => {
+  const obj = {};
+  ROLES_LIST.forEach(r => {
+    obj[r] = [];
+  });
+  return obj;
+};
+
 export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -140,26 +337,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
   const [paymentReceived, setPaymentReceived] = useState('');
   const [pendingPayment, setPendingPayment] = useState('');
   const [users, setUsers] = useState([]);
-  const [assignments, setAssignments] = useState({
-    'Android Developer': '',
-    'iOS Developer': '',
-    'Flutter Developer': '',
-    'Python Developer': '',
-    'Full Stack Developer': '',
-    'Angular Developer': '',
-    'Frontend Designer': '',
-    'Backend Developer': '',
-    'Delivery Head': '',
-    'QA': '',
-    'PC': '',
-    'BA': '',
-    'Sales': '',
-    'PM': '',
-    'CEO': '',
-    'Developer': '',
-    'Designer': '',
-    'Product Owner': ''
-  });
+  const [assignments, setAssignments] = useState(createEmptyAssignments);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -194,45 +372,27 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
         setDeliveryDate(`${yyyy}-${mm}-${dd}`);
       }
       
-      const newAssignments = {
-        'Android Developer': '',
-        'iOS Developer': '',
-        'Flutter Developer': '',
-        'Python Developer': '',
-        'Full Stack Developer': '',
-        'Angular Developer': '',
-        'Frontend Designer': '',
-        'Backend Developer': '',
-        'Delivery Head': '',
-        'QA': '',
-        'PC': '',
-        'BA': '',
-        'Sales': '',
-        'PM': '',
-        'CEO': '',
-        'Developer': '',
-        'Designer': '',
-        'Product Owner': ''
-      };
+      const newAssignments = createEmptyAssignments();
 
-      if (projectToEdit.teamMembers) {
+      if (projectToEdit.teamMembers && Array.isArray(projectToEdit.teamMembers)) {
         projectToEdit.teamMembers.forEach(member => {
           const memberId = typeof member === 'object' ? member._id : member;
           const memberObj = users.find(u => u._id === memberId);
           if (memberObj) {
-            let catRole = memberObj.role;
-            if (catRole === 'Quality Analyst (QA)') catRole = 'QA';
-            if (catRole === 'Project Manager (PM)') catRole = 'PM';
-            if (catRole === 'Business Analyst (BA)') catRole = 'BA';
-            if (catRole === 'Project Coordinator (PC)') catRole = 'PC';
-            if (catRole === 'Sales Rep') catRole = 'Sales';
-            newAssignments[catRole] = memberId;
+            const catRole = normalizeRoleName(memberObj.role);
+            if (!newAssignments[catRole]) {
+              newAssignments[catRole] = [];
+            }
+            if (!newAssignments[catRole].includes(memberId)) {
+              newAssignments[catRole].push(memberId);
+            }
           }
         });
       }
       setAssignments(newAssignments);
     }
   }, [projectToEdit, users]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!name || !deliveryDate) {
@@ -244,7 +404,13 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
     setError('');
 
     try {
-      const teamMembers = Object.values(assignments).filter(Boolean);
+      // Flatten all selected IDs across all roles into an array of unique user IDs
+      const teamMembers = Array.from(
+        new Set(
+          Object.values(assignments).flat().filter(Boolean)
+        )
+      );
+
       const url = projectToEdit ? `${API_BASE}/projects/${projectToEdit._id}` : `${API_BASE}/projects`;
       const method = projectToEdit ? 'PUT' : 'POST';
       const res = await fetch(url, {
@@ -270,37 +436,36 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
     }
   };
 
-  // Group users by role
-  const roles = [
-    'Android Developer', 'iOS Developer', 'Flutter Developer', 'Python Developer',
-    'Full Stack Developer', 'Angular Developer', 'Frontend Designer', 'Backend Developer',
-    'Delivery Head', 'QA', 'BA', 'PC', 'Sales', 'PM', 'CEO', 'Developer', 'Designer', 'Product Owner'
-  ];
-  const groupedUsers = roles.reduce((acc, r) => {
-    acc[r] = users.filter(u => {
-      if (r === 'QA') return u.role === 'QA' || u.role === 'Quality Analyst (QA)';
-      if (r === 'PM') return u.role === 'PM' || u.role === 'Project Manager (PM)';
-      if (r === 'BA') return u.role === 'BA' || u.role === 'Business Analyst (BA)';
-      if (r === 'PC') return u.role === 'PC' || u.role === 'Project Coordinator (PC)';
-      if (r === 'Sales') return u.role === 'Sales' || u.role === 'Sales Rep';
-      return u.role === r;
-    });
+  // Group users by normalized role
+  const groupedUsers = ROLES_LIST.reduce((acc, r) => {
+    acc[r] = users.filter(u => normalizeRoleName(u.role) === r);
     return acc;
   }, {});
+
+  const totalAssignedMembers = Array.from(
+    new Set(Object.values(assignments).flat().filter(Boolean))
+  ).length;
 
   return (
     <div style={styles.overlay}>
       <div className="fade-in" style={styles.modal}>
         <div style={styles.header}>
-          <h3 style={styles.title}>{projectToEdit ? 'Edit Project Details' : 'Create New Project'}</h3>
-          <button onClick={onClose} style={styles.closeBtn}>×</button>
+          <div>
+            <h3 style={styles.title}>{projectToEdit ? 'Edit Project Details' : 'Create New Project'}</h3>
+            <p style={styles.subtitle}>
+              {projectToEdit 
+                ? 'Update timeline, financials, or assign/remove team members across departments.' 
+                : 'Configure project info, milestones, and allocate multi-disciplinary team members.'}
+            </p>
+          </div>
+          <button onClick={onClose} style={styles.closeBtn} title="Close">×</button>
         </div>
 
         {error && <div style={styles.error}>{error}</div>}
 
         <form onSubmit={handleSubmit} style={styles.form}>
           <div style={styles.inputGroup}>
-            <label>Project Name</label>
+            <label style={styles.inputLabel}>Project Name</label>
             <input
               type="text"
               placeholder="e.g. E-Commerce Mobile App"
@@ -311,7 +476,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
           </div>
 
           <div style={styles.inputGroup}>
-            <label>Description</label>
+            <label style={styles.inputLabel}>Description</label>
             <textarea
               placeholder="Provide a brief project description..."
               value={description}
@@ -321,7 +486,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
           </div>
 
           <div style={styles.inputGroup}>
-            <label>Delivery Date</label>
+            <label style={styles.inputLabel}>Delivery Date</label>
             <CustomDatePicker
               value={deliveryDate}
               onChange={setDeliveryDate}
@@ -330,7 +495,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
             <div style={styles.inputGroup}>
-              <label>Total Revenue ($)</label>
+              <label style={styles.inputLabel}>Total Revenue ($)</label>
               <input
                 type="number"
                 placeholder="e.g. 50000"
@@ -340,7 +505,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
               />
             </div>
             <div style={styles.inputGroup}>
-              <label>Received ($)</label>
+              <label style={styles.inputLabel}>Received ($)</label>
               <input
                 type="number"
                 placeholder="e.g. 35000"
@@ -350,7 +515,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
               />
             </div>
             <div style={styles.inputGroup}>
-              <label>Pending ($)</label>
+              <label style={styles.inputLabel}>Pending ($)</label>
               <input
                 type="number"
                 placeholder="e.g. 15000"
@@ -362,25 +527,32 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
           </div>
 
           <div style={styles.teamSection}>
-            <label>Assign Team Members</label>
+            <div style={styles.teamSectionHeader}>
+              <label style={styles.teamSectionLabel}>ASSIGN TEAM MEMBERS</label>
+              <span style={styles.teamCountBadge}>
+                {totalAssignedMembers} {totalAssignedMembers === 1 ? 'member' : 'members'} assigned
+              </span>
+            </div>
             <div style={styles.assignmentsGrid}>
-              {roles.map(r => {
+              {ROLES_LIST.map(r => {
                 const roleUsers = groupedUsers[r] || [];
+                const roleSelectedIds = assignments[r] || [];
                 return (
                   <div key={r} style={styles.assignmentGroup}>
-                    <label style={styles.roleLabel}>{r}</label>
-                    <select
-                      value={assignments[r] || ''}
-                      onChange={(e) => setAssignments({ ...assignments, [r]: e.target.value })}
-                      style={styles.assignmentSelect}
-                    >
-                      <option value="">Select member...</option>
-                      {roleUsers.map(u => (
-                        <option key={u._id} value={u._id}>
-                          {u.name}
-                        </option>
-                      ))}
-                    </select>
+                    <div style={styles.roleHeaderRow}>
+                      <label style={styles.roleLabel}>{r}</label>
+                      {roleSelectedIds.length > 0 && (
+                        <span style={styles.roleCountPill}>
+                          {roleSelectedIds.length}
+                        </span>
+                      )}
+                    </div>
+                    <RoleMultiSelect
+                      role={r}
+                      availableUsers={roleUsers}
+                      selectedIds={roleSelectedIds}
+                      onChange={(newIds) => setAssignments(prev => ({ ...prev, [r]: newIds }))}
+                    />
                   </div>
                 );
               })}
@@ -408,7 +580,7 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.3)',
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
     backdropFilter: 'blur(4px)',
     display: 'flex',
     alignItems: 'center',
@@ -417,9 +589,9 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '540px',
-    padding: '30px',
-    boxShadow: '0 20px 40px rgba(15, 23, 42, 0.12)',
+    maxWidth: '580px',
+    padding: '28px 30px',
+    boxShadow: '0 20px 45px rgba(15, 23, 42, 0.16)',
     maxHeight: '90vh',
     overflowY: 'auto',
     display: 'flex',
@@ -431,13 +603,19 @@ const styles = {
   header: {
     display: 'flex',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: '20px',
+    alignItems: 'flex-start',
+    marginBottom: '18px',
   },
   title: {
     fontSize: '20px',
     fontWeight: '600',
     color: 'var(--text-primary)',
+    margin: 0,
+  },
+  subtitle: {
+    fontSize: '12px',
+    color: 'var(--text-secondary)',
+    margin: '4px 0 0 0',
   },
   closeBtn: {
     background: 'transparent',
@@ -445,7 +623,8 @@ const styles = {
     fontSize: '24px',
     color: 'var(--text-secondary)',
     cursor: 'pointer',
-    padding: '0 6px',
+    padding: '0 4px',
+    lineHeight: '1',
   },
   error: {
     background: 'rgba(255, 69, 58, 0.1)',
@@ -454,7 +633,7 @@ const styles = {
     color: 'var(--accent-red)',
     padding: '12px',
     fontSize: '13px',
-    marginBottom: '20px',
+    marginBottom: '16px',
   },
   form: {
     display: 'flex',
@@ -465,41 +644,266 @@ const styles = {
     display: 'flex',
     flexDirection: 'column',
   },
+  inputLabel: {
+    fontSize: '13px',
+    fontWeight: '600',
+    color: 'var(--text-primary)',
+    marginBottom: '6px',
+  },
   teamSection: {
     display: 'flex',
     flexDirection: 'column',
+    marginTop: '4px',
+  },
+  teamSectionHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '10px',
+  },
+  teamSectionLabel: {
+    fontSize: '11px',
+    fontWeight: '700',
+    color: 'var(--text-secondary)',
+    textTransform: 'uppercase',
+    letterSpacing: '0.6px',
+  },
+  teamCountBadge: {
+    fontSize: '11px',
+    fontWeight: '600',
+    color: 'var(--accent-blue)',
+    backgroundColor: 'rgba(30, 58, 138, 0.08)',
+    padding: '2px 8px',
+    borderRadius: '12px',
   },
   assignmentsGrid: {
     display: 'grid',
     gridTemplateColumns: '1fr 1fr',
-    gap: '12px',
-    maxHeight: '220px',
+    gap: '14px',
+    maxHeight: '260px',
     overflowY: 'auto',
-    paddingRight: '8px',
-    paddingBottom: '8px',
+    paddingRight: '6px',
+    paddingBottom: '6px',
   },
   assignmentGroup: {
     display: 'flex',
     flexDirection: 'column',
     gap: '4px',
   },
+  roleHeaderRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: '2px',
+  },
   roleLabel: {
     fontSize: '11px',
     fontWeight: '600',
     color: 'var(--text-secondary)',
-    marginBottom: '2px',
     textTransform: 'uppercase',
     letterSpacing: '0.5px',
   },
-  assignmentSelect: {
-    padding: '8px 12px',
-    fontSize: '13px',
+  roleCountPill: {
+    fontSize: '10px',
+    fontWeight: '700',
+    color: 'var(--accent-blue)',
+    backgroundColor: 'rgba(30, 58, 138, 0.1)',
+    borderRadius: '10px',
+    padding: '1px 6px',
+  },
+  multiSelectContainer: {
+    position: 'relative',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '6px',
+  },
+  multiSelectTrigger: {
+    minHeight: '38px',
+    padding: '7px 10px',
     background: '#ffffff',
     border: '1px solid rgba(15, 23, 42, 0.12)',
     borderRadius: '8px',
     cursor: 'pointer',
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: '13px',
     color: 'var(--text-primary)',
     fontFamily: 'var(--font-main)',
+    transition: 'var(--transition-smooth)',
+  },
+  triggerTextWrapper: {
+    flex: 1,
+    minWidth: 0,
+    display: 'flex',
+    alignItems: 'center',
+  },
+  placeholderText: {
+    color: 'var(--text-muted)',
+    fontSize: '13px',
+  },
+  triggerSelectedSummary: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '6px',
+    width: '100%',
+  },
+  selectedNamesPreview: {
+    fontSize: '13px',
+    color: 'var(--text-primary)',
+    fontWeight: '500',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    flex: 1,
+  },
+  selectedCountBadge: {
+    fontSize: '10px',
+    fontWeight: '700',
+    color: '#ffffff',
+    backgroundColor: 'var(--accent-blue)',
+    borderRadius: '10px',
+    padding: '1px 5px',
+    flexShrink: 0,
+  },
+  dropdownMenuCard: {
+    position: 'absolute',
+    top: 'calc(100% + 4px)',
+    left: 0,
+    right: 0,
+    background: '#ffffff',
+    border: '1px solid rgba(15, 23, 42, 0.15)',
+    borderRadius: '10px',
+    boxShadow: '0 10px 25px rgba(15, 23, 42, 0.15)',
+    zIndex: 200,
+    display: 'flex',
+    flexDirection: 'column',
+    overflow: 'hidden',
+  },
+  searchBoxWrapper: {
+    padding: '8px 10px',
+    borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
+    backgroundColor: '#f8fafc',
+  },
+  searchBoxInput: {
+    width: '100%',
+    padding: '6px 10px',
+    fontSize: '12px',
+    borderRadius: '6px',
+    border: '1px solid rgba(15, 23, 42, 0.12)',
+    outline: 'none',
+  },
+  bulkActionsRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    padding: '6px 10px',
+    backgroundColor: '#f8fafc',
+    borderBottom: '1px solid rgba(15, 23, 42, 0.08)',
+  },
+  bulkActionButton: {
+    background: 'none',
+    border: 'none',
+    color: 'var(--accent-blue)',
+    fontSize: '11px',
+    fontWeight: '600',
+    cursor: 'pointer',
+    padding: '2px 4px',
+    width: 'auto',
+  },
+  optionsList: {
+    maxHeight: '160px',
+    overflowY: 'auto',
+    padding: '4px 0',
+  },
+  emptyRoleNotice: {
+    padding: '12px 10px',
+    fontSize: '12px',
+    color: 'var(--text-muted)',
+    textAlign: 'center',
+  },
+  userOptionItem: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    padding: '7px 10px',
+    cursor: 'pointer',
+    transition: 'background-color 0.15s ease',
+  },
+  checkboxBox: {
+    width: '16px',
+    height: '16px',
+    borderRadius: '4px',
+    border: '1.5px solid rgba(15, 23, 42, 0.25)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    transition: 'all 0.15s ease',
+  },
+  checkboxCheck: {
+    color: '#ffffff',
+    fontSize: '11px',
+    fontWeight: '700',
+    lineHeight: '1',
+  },
+  userOptionTextGroup: {
+    display: 'flex',
+    flexDirection: 'column',
+    flex: 1,
+    minWidth: 0,
+  },
+  userOptionName: {
+    fontSize: '13px',
+    color: 'var(--text-primary)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  userOptionEmail: {
+    fontSize: '11px',
+    color: 'var(--text-muted)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  selectedTagsRow: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '4px',
+    marginTop: '2px',
+  },
+  selectedTagPill: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: '4px',
+    backgroundColor: 'rgba(30, 58, 138, 0.08)',
+    color: 'var(--accent-blue)',
+    border: '1px solid rgba(30, 58, 138, 0.15)',
+    borderRadius: '6px',
+    padding: '2px 6px',
+    fontSize: '11px',
+    fontWeight: '500',
+  },
+  selectedTagLabel: {
+    maxWidth: '120px',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  removeTagCross: {
+    background: 'none',
+    border: 'none',
+    color: 'var(--accent-blue)',
+    cursor: 'pointer',
+    padding: 0,
+    fontSize: '13px',
+    lineHeight: '1',
+    fontWeight: '700',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '12px',
+    height: '12px',
   },
   footerBtns: {
     display: 'flex',
@@ -534,6 +938,7 @@ const styles = {
   caret: {
     fontSize: '10px',
     color: 'var(--text-secondary)',
+    marginLeft: '6px',
   },
   calendarCard: {
     position: 'absolute',

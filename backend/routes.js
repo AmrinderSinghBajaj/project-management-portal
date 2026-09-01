@@ -223,7 +223,7 @@ router.put('/projects/:id', async (req, res) => {
     if (totalRevenue !== undefined) project.totalRevenue = Number(totalRevenue) || 0;
     if (paymentReceived !== undefined) project.paymentReceived = Number(paymentReceived) || 0;
     if (pendingPayment !== undefined) project.pendingPayment = Number(pendingPayment) || 0;
-    if (teamMembers) project.teamMembers = teamMembers;
+    if (teamMembers !== undefined) project.teamMembers = teamMembers;
     if (columns) project.columns = columns;
 
     await project.save();

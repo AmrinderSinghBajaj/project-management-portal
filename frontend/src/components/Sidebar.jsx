@@ -75,7 +75,7 @@ export default function Sidebar({
 
         <div style={styles.navHeader}>
           <span>PROJECTS</span>
-          {currentUser?.role === 'PM' && (
+          {(isPriorityManager || ['Delivery Head', 'CEO'].includes(currentUser?.role)) && (
             <button 
               className="sidebar-add-btn"
               onClick={onTriggerCreateProject}

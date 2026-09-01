@@ -189,52 +189,81 @@ export default function ProjectBoard({
   // Global Search state
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Multi-select Filter state for Board
-  const [selectedFilterTypes, setSelectedFilterTypes] = useState([]); // [] means all, or ['Feature', 'Bug']
-  const [selectedFilterPriorities, setSelectedFilterPriorities] = useState([]); // [] means all, or ['High', 'Medium']
-  const [selectedFilterTechs, setSelectedFilterTechs] = useState([]); // [] means all, or ['android', 'ios']
+  // Applied filters on the actual board
+  const [appliedFilterTypes, setAppliedFilterTypes] = useState([]); // [] means all, or ['Feature', 'Bug']
+  const [appliedFilterPriorities, setAppliedFilterPriorities] = useState([]); // [] means all, or ['High', 'Medium']
+  const [appliedFilterTechs, setAppliedFilterTechs] = useState([]); // [] means all, or ['android', 'ios']
+
+  // Staged / Temporary filters inside the open dropdown
+  const [tempFilterTypes, setTempFilterTypes] = useState([]);
+  const [tempFilterPriorities, setTempFilterPriorities] = useState([]);
+  const [tempFilterTechs, setTempFilterTechs] = useState([]);
+
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
 
-  const toggleFilterType = (type) => {
+  // When opening the menu, copy applied to temp
+  const handleOpenFilterMenu = () => {
+    setTempFilterTypes([...appliedFilterTypes]);
+    setTempFilterPriorities([...appliedFilterPriorities]);
+    setTempFilterTechs([...appliedFilterTechs]);
+    setIsFilterMenuOpen(true);
+  };
+
+  const handleCloseFilterMenu = () => {
+    setIsFilterMenuOpen(false);
+  };
+
+  const toggleTempFilterType = (type) => {
     if (type === 'All') {
-      setSelectedFilterTypes([]);
+      setTempFilterTypes([]);
     } else {
-      setSelectedFilterTypes(prev => 
+      setTempFilterTypes(prev => 
         prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
       );
     }
   };
 
-  const toggleFilterPriority = (priority) => {
+  const toggleTempFilterPriority = (priority) => {
     if (priority === 'All') {
-      setSelectedFilterPriorities([]);
+      setTempFilterPriorities([]);
     } else {
-      setSelectedFilterPriorities(prev => 
+      setTempFilterPriorities(prev => 
         prev.includes(priority) ? prev.filter(p => p !== priority) : [...prev, priority]
       );
     }
   };
 
-  const toggleFilterTech = (tech) => {
+  const toggleTempFilterTech = (tech) => {
     if (tech === 'All') {
-      setSelectedFilterTechs([]);
+      setTempFilterTechs([]);
     } else {
       const lower = tech.toLowerCase();
-      setSelectedFilterTechs(prev => 
+      setTempFilterTechs(prev => 
         prev.includes(lower) ? prev.filter(t => t !== lower) : [...prev, lower]
       );
     }
   };
 
-  const clearAllFilters = () => {
-    setSelectedFilterTypes([]);
-    setSelectedFilterPriorities([]);
-    setSelectedFilterTechs([]);
+  const handleApplyFilters = () => {
+    setAppliedFilterTypes(tempFilterTypes);
+    setAppliedFilterPriorities(tempFilterPriorities);
+    setAppliedFilterTechs(tempFilterTechs);
+    setIsFilterMenuOpen(false);
   };
 
-  const activeFilterCount = selectedFilterTypes.length + 
-                            selectedFilterPriorities.length + 
-                            selectedFilterTechs.length;
+  const handleClearAllFilters = () => {
+    setTempFilterTypes([]);
+    setTempFilterPriorities([]);
+    setTempFilterTechs([]);
+    setAppliedFilterTypes([]);
+    setAppliedFilterPriorities([]);
+    setAppliedFilterTechs([]);
+    setIsFilterMenuOpen(false);
+  };
+
+  const activeFilterCount = appliedFilterTypes.length + 
+                            appliedFilterPriorities.length + 
+                            appliedFilterTechs.length;
 
   const filteredSearchTickets = tickets.filter(t => {
     const query = searchQuery.trim().toLowerCase();
@@ -1051,7 +1080,13 @@ Figma Reference Link:
             <div style={{ position: 'relative' }}>
               <button
                 type="button"
-                onClick={() => setIsFilterMenuOpen(!isFilterMenuOpen)}
+                onClick={() => {
+                  if (isFilterMenuOpen) {
+                    handleCloseFilterMenu();
+                  } else {
+                    handleOpenFilterMenu();
+                  }
+                }}
                 style={{
                   ...styles.filterToggleBtn,
                   backgroundColor: activeFilterCount > 0 ? 'var(--accent-blue)' : '#ffffff',
@@ -1073,20 +1108,28 @@ Figma Reference Link:
                 <>
                   <div 
                     style={styles.dropdownOverlayClose} 
-                    onClick={() => setIsFilterMenuOpen(false)} 
+                    onClick={handleCloseFilterMenu} 
                   />
-                  <div style={styles.filterMenuPanel} className="fade-in">
+                  <div 
+                    style={styles.filterMenuPanel} 
+                    className="fade-in"
+                    onClick={(e) => e.stopPropagation()}
+                  >
                     <div style={styles.filterMenuHeader}>
                       <span style={{ fontWeight: '700', fontSize: '13px', color: 'var(--text-primary)' }}>
                         Filter Board Tickets
                       </span>
-                      {activeFilterCount > 0 && (
+                      {(tempFilterTypes.length > 0 || tempFilterPriorities.length > 0 || tempFilterTechs.length > 0) && (
                         <button
                           type="button"
-                          onClick={clearAllFilters}
+                          onClick={() => {
+                            setTempFilterTypes([]);
+                            setTempFilterPriorities([]);
+                            setTempFilterTechs([]);
+                          }}
                           style={styles.clearFiltersBtn}
                         >
-                          Clear Filters
+                          Reset Selections
                         </button>
                       )}
                     </div>
@@ -1102,12 +1145,15 @@ Figma Reference Link:
                           { value: 'Bug', label: '🐞 Bug' }
                         ].map(opt => {
                           const isSelected = opt.value === 'All' 
-                            ? selectedFilterTypes.length === 0 
-                            : selectedFilterTypes.includes(opt.value);
+                            ? tempFilterTypes.length === 0 
+                            : tempFilterTypes.includes(opt.value);
                           return (
                             <div
                               key={opt.value}
-                              onClick={() => toggleFilterType(opt.value)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleTempFilterType(opt.value);
+                              }}
                               style={{
                                 ...styles.filterOptionPill,
                                 backgroundColor: isSelected ? '#1e3a8a' : '#f8fafc',
@@ -1137,12 +1183,15 @@ Figma Reference Link:
                           { value: 'Low', label: '🟢 Low', color: '#059669' }
                         ].map(opt => {
                           const isSelected = opt.value === 'All' 
-                            ? selectedFilterPriorities.length === 0 
-                            : selectedFilterPriorities.includes(opt.value);
+                            ? tempFilterPriorities.length === 0 
+                            : tempFilterPriorities.includes(opt.value);
                           return (
                             <div
                               key={opt.value}
-                              onClick={() => toggleFilterPriority(opt.value)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleTempFilterPriority(opt.value);
+                              }}
                               style={{
                                 ...styles.filterOptionPill,
                                 backgroundColor: isSelected ? opt.color : '#f8fafc',
@@ -1167,13 +1216,16 @@ Figma Reference Link:
                       <div style={{ ...styles.filterOptionsGrid, maxHeight: '130px', overflowY: 'auto' }}>
                         {['All', 'android', 'ios', 'backend', 'angular', 'design', 'qa', 'react', 'flutter', 'python'].map(tech => {
                           const isSelected = tech === 'All' 
-                            ? selectedFilterTechs.length === 0 
-                            : selectedFilterTechs.includes(tech.toLowerCase());
+                            ? tempFilterTechs.length === 0 
+                            : tempFilterTechs.includes(tech.toLowerCase());
                           const label = tech === 'All' ? 'All Teams' : tech === 'ios' ? 'iOS' : tech === 'qa' ? 'QA' : tech.charAt(0).toUpperCase() + tech.slice(1);
                           return (
                             <div
                               key={tech}
-                              onClick={() => toggleFilterTech(tech)}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleTempFilterTech(tech);
+                              }}
                               style={{
                                 ...styles.filterOptionPill,
                                 backgroundColor: isSelected ? '#1e3a8a' : '#f8fafc',
@@ -1189,6 +1241,69 @@ Figma Reference Link:
                             </div>
                           );
                         })}
+                      </div>
+                    </div>
+
+                    {/* Filter Footer with Action Buttons */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '10px', borderTop: '1px solid rgba(15, 23, 42, 0.08)' }}>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleClearAllFilters();
+                        }}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#ef4444',
+                          fontSize: '12px',
+                          fontWeight: '600',
+                          cursor: 'pointer',
+                          padding: '4px 0'
+                        }}
+                      >
+                        Clear All
+                      </button>
+                      <div style={{ display: 'flex', gap: '8px' }}>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleCloseFilterMenu();
+                          }}
+                          style={{
+                            padding: '6px 12px',
+                            fontSize: '12px',
+                            fontWeight: '600',
+                            borderRadius: '8px',
+                            backgroundColor: '#f1f5f9',
+                            color: '#475569',
+                            border: '1px solid #cbd5e1',
+                            cursor: 'pointer'
+                          }}
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleApplyFilters();
+                          }}
+                          style={{
+                            padding: '6px 16px',
+                            fontSize: '12px',
+                            fontWeight: '700',
+                            borderRadius: '8px',
+                            backgroundColor: 'var(--accent-blue)',
+                            color: '#ffffff',
+                            border: 'none',
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 6px rgba(30, 58, 138, 0.3)'
+                          }}
+                        >
+                          Apply Filters { (tempFilterTypes.length + tempFilterPriorities.length + tempFilterTechs.length) > 0 ? `(${tempFilterTypes.length + tempFilterPriorities.length + tempFilterTechs.length})` : '' }
+                        </button>
                       </div>
                     </div>
                   </div>
@@ -1218,11 +1333,11 @@ Figma Reference Link:
               const colTickets = tickets
                 .filter(t => {
                   if (t.status !== col.title) return false;
-                  if (selectedFilterTypes.length > 0 && !selectedFilterTypes.includes(t.ticketType || 'Task')) return false;
-                  if (selectedFilterPriorities.length > 0 && !selectedFilterPriorities.includes(t.priority || 'Medium')) return false;
-                  if (selectedFilterTechs.length > 0) {
+                  if (appliedFilterTypes.length > 0 && !appliedFilterTypes.includes(t.ticketType || 'Task')) return false;
+                  if (appliedFilterPriorities.length > 0 && !appliedFilterPriorities.includes(t.priority || 'Medium')) return false;
+                  if (appliedFilterTechs.length > 0) {
                     const ticketTags = (t.tags || []).map(tg => tg.toLowerCase());
-                    const hasMatch = selectedFilterTechs.some(tech => ticketTags.includes(tech));
+                    const hasMatch = appliedFilterTechs.some(tech => ticketTags.includes(tech));
                     if (!hasMatch) return false;
                   }
                   return true;
@@ -3033,7 +3148,7 @@ const styles = {
     border: '1px solid rgba(15, 23, 42, 0.1)',
     boxShadow: '0 16px 36px rgba(15, 23, 42, 0.15)',
     padding: '16px',
-    zIndex: 100,
+    zIndex: 1050,
     display: 'flex',
     flexDirection: 'column',
     gap: '14px',

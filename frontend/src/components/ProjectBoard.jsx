@@ -189,15 +189,52 @@ export default function ProjectBoard({
   // Global Search state
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Filter state for Board
-  const [selectedFilterType, setSelectedFilterType] = useState('All'); // All, Feature, Task, Bug
-  const [selectedFilterPriority, setSelectedFilterPriority] = useState('All'); // All, High, Medium, Low
-  const [selectedFilterTech, setSelectedFilterTech] = useState('All'); // All, android, ios, backend, etc.
+  // Multi-select Filter state for Board
+  const [selectedFilterTypes, setSelectedFilterTypes] = useState([]); // [] means all, or ['Feature', 'Bug']
+  const [selectedFilterPriorities, setSelectedFilterPriorities] = useState([]); // [] means all, or ['High', 'Medium']
+  const [selectedFilterTechs, setSelectedFilterTechs] = useState([]); // [] means all, or ['android', 'ios']
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
 
-  const activeFilterCount = (selectedFilterType !== 'All' ? 1 : 0) + 
-                            (selectedFilterPriority !== 'All' ? 1 : 0) + 
-                            (selectedFilterTech !== 'All' ? 1 : 0);
+  const toggleFilterType = (type) => {
+    if (type === 'All') {
+      setSelectedFilterTypes([]);
+    } else {
+      setSelectedFilterTypes(prev => 
+        prev.includes(type) ? prev.filter(t => t !== type) : [...prev, type]
+      );
+    }
+  };
+
+  const toggleFilterPriority = (priority) => {
+    if (priority === 'All') {
+      setSelectedFilterPriorities([]);
+    } else {
+      setSelectedFilterPriorities(prev => 
+        prev.includes(priority) ? prev.filter(p => p !== priority) : [...prev, priority]
+      );
+    }
+  };
+
+  const toggleFilterTech = (tech) => {
+    if (tech === 'All') {
+      setSelectedFilterTechs([]);
+    } else {
+      const lower = tech.toLowerCase();
+      setSelectedFilterTechs(prev => 
+        prev.includes(lower) ? prev.filter(t => t !== lower) : [...prev, lower]
+      );
+    }
+  };
+
+  const clearAllFilters = () => {
+    setSelectedFilterTypes([]);
+    setSelectedFilterPriorities([]);
+    setSelectedFilterTechs([]);
+  };
+
+  const activeFilterCount = selectedFilterTypes.length + 
+                            selectedFilterPriorities.length + 
+                            selectedFilterTechs.length;
 
   const filteredSearchTickets = tickets.filter(t => {
     const query = searchQuery.trim().toLowerCase();
@@ -1046,11 +1083,7 @@ Figma Reference Link:
                       {activeFilterCount > 0 && (
                         <button
                           type="button"
-                          onClick={() => {
-                            setSelectedFilterType('All');
-                            setSelectedFilterPriority('All');
-                            setSelectedFilterTech('All');
-                          }}
+                          onClick={clearAllFilters}
                           style={styles.clearFiltersBtn}
                         >
                           Clear Filters
@@ -1068,11 +1101,13 @@ Figma Reference Link:
                           { value: 'Task', label: '📋 Task' },
                           { value: 'Bug', label: '🐞 Bug' }
                         ].map(opt => {
-                          const isSelected = selectedFilterType === opt.value;
+                          const isSelected = opt.value === 'All' 
+                            ? selectedFilterTypes.length === 0 
+                            : selectedFilterTypes.includes(opt.value);
                           return (
                             <div
                               key={opt.value}
-                              onClick={() => setSelectedFilterType(opt.value)}
+                              onClick={() => toggleFilterType(opt.value)}
                               style={{
                                 ...styles.filterOptionPill,
                                 backgroundColor: isSelected ? '#1e3a8a' : '#f8fafc',
@@ -1080,10 +1115,11 @@ Figma Reference Link:
                                 borderColor: isSelected ? '#1e3a8a' : '#cbd5e1',
                                 fontWeight: isSelected ? '700' : '600',
                                 boxShadow: isSelected ? '0 2px 8px rgba(30, 58, 138, 0.25)' : '0 1px 2px rgba(0,0,0,0.03)',
+                                cursor: 'pointer',
                               }}
                               className="filter-pill-item"
                             >
-                              {opt.label}
+                              {opt.label} {opt.value !== 'All' && isSelected && '✓'}
                             </div>
                           );
                         })}
@@ -1100,11 +1136,13 @@ Figma Reference Link:
                           { value: 'Medium', label: '🟡 Medium', color: '#d97706' },
                           { value: 'Low', label: '🟢 Low', color: '#059669' }
                         ].map(opt => {
-                          const isSelected = selectedFilterPriority === opt.value;
+                          const isSelected = opt.value === 'All' 
+                            ? selectedFilterPriorities.length === 0 
+                            : selectedFilterPriorities.includes(opt.value);
                           return (
                             <div
                               key={opt.value}
-                              onClick={() => setSelectedFilterPriority(opt.value)}
+                              onClick={() => toggleFilterPriority(opt.value)}
                               style={{
                                 ...styles.filterOptionPill,
                                 backgroundColor: isSelected ? opt.color : '#f8fafc',
@@ -1112,10 +1150,11 @@ Figma Reference Link:
                                 borderColor: isSelected ? opt.color : '#cbd5e1',
                                 fontWeight: isSelected ? '700' : '600',
                                 boxShadow: isSelected ? '0 2px 8px rgba(0, 0, 0, 0.2)' : '0 1px 2px rgba(0,0,0,0.03)',
+                                cursor: 'pointer',
                               }}
                               className="filter-pill-item"
                             >
-                              {opt.label}
+                              {opt.label} {opt.value !== 'All' && isSelected && '✓'}
                             </div>
                           );
                         })}
@@ -1127,12 +1166,14 @@ Figma Reference Link:
                       <label style={styles.filterGroupLabel}>TECH / TEAM</label>
                       <div style={{ ...styles.filterOptionsGrid, maxHeight: '130px', overflowY: 'auto' }}>
                         {['All', 'android', 'ios', 'backend', 'angular', 'design', 'qa', 'react', 'flutter', 'python'].map(tech => {
-                          const isSelected = selectedFilterTech === tech;
+                          const isSelected = tech === 'All' 
+                            ? selectedFilterTechs.length === 0 
+                            : selectedFilterTechs.includes(tech.toLowerCase());
                           const label = tech === 'All' ? 'All Teams' : tech === 'ios' ? 'iOS' : tech === 'qa' ? 'QA' : tech.charAt(0).toUpperCase() + tech.slice(1);
                           return (
                             <div
                               key={tech}
-                              onClick={() => setSelectedFilterTech(tech)}
+                              onClick={() => toggleFilterTech(tech)}
                               style={{
                                 ...styles.filterOptionPill,
                                 backgroundColor: isSelected ? '#1e3a8a' : '#f8fafc',
@@ -1140,10 +1181,11 @@ Figma Reference Link:
                                 borderColor: isSelected ? '#1e3a8a' : '#cbd5e1',
                                 fontWeight: isSelected ? '700' : '600',
                                 boxShadow: isSelected ? '0 2px 8px rgba(30, 58, 138, 0.25)' : '0 1px 2px rgba(0,0,0,0.03)',
+                                cursor: 'pointer',
                               }}
                               className="filter-pill-item"
                             >
-                              {label}
+                              {label} {tech !== 'All' && isSelected && '✓'}
                             </div>
                           );
                         })}
@@ -1176,9 +1218,13 @@ Figma Reference Link:
               const colTickets = tickets
                 .filter(t => {
                   if (t.status !== col.title) return false;
-                  if (selectedFilterType !== 'All' && (t.ticketType || 'Task') !== selectedFilterType) return false;
-                  if (selectedFilterPriority !== 'All' && (t.priority || 'Medium') !== selectedFilterPriority) return false;
-                  if (selectedFilterTech !== 'All' && !t.tags?.includes(selectedFilterTech.toLowerCase())) return false;
+                  if (selectedFilterTypes.length > 0 && !selectedFilterTypes.includes(t.ticketType || 'Task')) return false;
+                  if (selectedFilterPriorities.length > 0 && !selectedFilterPriorities.includes(t.priority || 'Medium')) return false;
+                  if (selectedFilterTechs.length > 0) {
+                    const ticketTags = (t.tags || []).map(tg => tg.toLowerCase());
+                    const hasMatch = selectedFilterTechs.some(tech => ticketTags.includes(tech));
+                    if (!hasMatch) return false;
+                  }
                   return true;
                 })
                 .sort((a, b) => {

@@ -1,0 +1,16 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "http://43.205.129.213:5001/api/:path*"
+    },
+    {
+      "source": "/uploads/:path*",
+      "destination": "http://43.205.129.213:5001/uploads/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

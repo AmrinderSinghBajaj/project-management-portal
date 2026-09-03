@@ -170,11 +170,14 @@ export default function App() {
       {/* CREATE PROJECT MODAL */}
       {showCreateProject && (
         <CreateProjectModal
+          currentUser={currentUser}
           onClose={() => setShowCreateProject(false)}
           onSuccess={(newProj) => {
             setShowCreateProject(false);
             triggerRefresh();
-            setActiveProjectId(newProj._id);
+            if (newProj && newProj._id) {
+              setActiveProjectId(newProj._id);
+            }
           }}
         />
       )}
@@ -182,9 +185,17 @@ export default function App() {
       {projectToEdit && (
         <CreateProjectModal
           projectToEdit={projectToEdit}
+          currentUser={currentUser}
           onClose={() => setProjectToEdit(null)}
           onSuccess={() => {
             setProjectToEdit(null);
+            triggerRefresh();
+          }}
+          onDeleteProject={(deletedProjId) => {
+            setProjectToEdit(null);
+            if (activeProjectId === deletedProjId) {
+              setActiveProjectId(null);
+            }
             triggerRefresh();
           }}
         />

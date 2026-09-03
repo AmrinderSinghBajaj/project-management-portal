@@ -350,7 +350,7 @@ const createEmptyAssignments = () => {
   return obj;
 };
 
-export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }) {
+export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, currentUser, onDeleteProject }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [deliveryDate, setDeliveryDate] = useState('');
@@ -360,6 +360,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
   const [users, setUsers] = useState([]);
   const [assignments, setAssignments] = useState(createEmptyAssignments);
   const [loading, setLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -454,6 +455,45 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
       setError(err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const userRoleLower = (currentUser?.role || '').toLowerCase();
+  const canDeleteProject = userRoleLower.includes('pm') || 
+                           userRoleLower.includes('project manager') || 
+                           userRoleLower.includes('pc') || 
+                           userRoleLower.includes('project coordinator') || 
+                           userRoleLower.includes('delivery head') || 
+                           userRoleLower.includes('dl') || 
+                           userRoleLower.includes('ceo') || 
+                           userRoleLower.includes('product owner') || 
+                           userRoleLower.includes('po');
+
+  const handleDeleteProject = async () => {
+    if (!projectToEdit?._id) return;
+    const confirmMsg = `Are you sure you want to permanently delete "${projectToEdit.name}"?\n\nAll tasks, board columns, documents, and comments associated with this project will be deleted permanently. This action cannot be undone.`;
+    if (!window.confirm(confirmMsg)) return;
+
+    setIsDeleting(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/projects/${projectToEdit._id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userRole: currentUser?.role })
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to delete project');
+      }
+      if (onDeleteProject) {
+        onDeleteProject(projectToEdit._id);
+      } else {
+        onSuccess(null);
+      }
+    } catch (err) {
+      setError(err.message);
+      setIsDeleting(false);
     }
   };
 
@@ -582,13 +622,26 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
             </div>
           </div>
 
-          <div style={styles.footerBtns}>
-            <button type="button" onClick={onClose} className="secondary" style={styles.btn}>
-              Cancel
-            </button>
-            <button type="submit" disabled={loading} style={styles.btn}>
-              {loading ? 'Saving...' : projectToEdit ? 'Save Changes' : 'Create Project'}
-            </button>
+          <div style={{ ...styles.footerBtns, justifyContent: (projectToEdit && canDeleteProject) ? 'space-between' : 'flex-end' }}>
+            {projectToEdit && canDeleteProject && (
+              <button 
+                type="button" 
+                onClick={handleDeleteProject} 
+                disabled={loading || isDeleting}
+                style={styles.deleteProjectBtn}
+                title="Permanently delete this project"
+              >
+                {isDeleting ? 'Deleting...' : 'Delete Project'}
+              </button>
+            )}
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button type="button" onClick={onClose} className="secondary" style={styles.btn}>
+                Cancel
+              </button>
+              <button type="submit" disabled={loading || isDeleting} style={styles.btn}>
+                {loading ? 'Saving...' : projectToEdit ? 'Save Changes' : 'Create Project'}
+              </button>
+            </div>
           </div>
         </form>
       </div>
@@ -930,9 +983,23 @@ const styles = {
   },
   footerBtns: {
     display: 'flex',
-    justifyContent: 'flex-end',
+    alignItems: 'center',
     gap: '12px',
     marginTop: '10px',
+  },
+  deleteProjectBtn: {
+    padding: '9px 14px',
+    fontSize: '12.5px',
+    fontWeight: '600',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    color: '#dc2626',
+    border: '1px solid rgba(239, 68, 68, 0.25)',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '4px',
   },
   btn: {
     padding: '10px 20px',

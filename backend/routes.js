@@ -292,6 +292,36 @@ router.put('/projects/:id', async (req, res) => {
   }
 });
 
+// Delete Project (Cascade deletes tickets)
+router.delete('/projects/:id', async (req, res) => {
+  try {
+    const project = await Project.findById(req.params.id);
+    if (!project) {
+      return res.status(404).json({ error: 'Project not found.' });
+    }
+
+    const userRole = (req.body?.userRole || req.query?.userRole || '').toLowerCase();
+    if (userRole) {
+      const isAuthorized = userRole.includes('pm') || userRole.includes('project manager') ||
+                           userRole.includes('pc') || userRole.includes('project coordinator') ||
+                           userRole.includes('delivery head') || userRole.includes('dl') ||
+                           userRole.includes('ceo') || userRole.includes('product owner') || userRole.includes('po');
+      if (!isAuthorized) {
+        return res.status(403).json({ error: 'Permission Denied: Only PM, PC, DL, CEO, and Product Owner have permission to delete projects.' });
+      }
+    }
+
+    // Cascade delete associated tickets
+    await Ticket.deleteMany({ project: req.params.id });
+
+    // Delete project
+    await Project.findByIdAndDelete(req.params.id);
+
+    res.json({ message: `Project '${project.name}' and all associated tickets deleted successfully.` });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // --- DOCUMENTS (Upload) ---
 

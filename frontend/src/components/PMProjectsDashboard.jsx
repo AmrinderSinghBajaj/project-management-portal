@@ -510,16 +510,23 @@ export default function PMProjectsDashboard({
                   >
                     Open Board →
                   </button>
-                  {['PM', 'Project Manager (PM)', 'CEO'].includes(currentUser?.role) && (
-                    <button
-                      type="button"
-                      onClick={() => onEditProject(project)}
-                      style={styles.settingsIconBtn}
-                      title="Edit Project"
-                    >
-                      ⚙️
-                    </button>
-                  )}
+                  {(() => {
+                    const r = (currentUser?.role || '').toLowerCase();
+                    const canManage = r.includes('pm') || r.includes('project manager') ||
+                                      r.includes('pc') || r.includes('project coordinator') ||
+                                      r.includes('delivery head') || r.includes('dl') ||
+                                      r.includes('ceo') || r.includes('product owner') || r.includes('po');
+                    return canManage ? (
+                      <button
+                        type="button"
+                        onClick={() => onEditProject(project)}
+                        style={styles.settingsIconBtn}
+                        title="Edit / Manage Project"
+                      >
+                        ⚙️
+                      </button>
+                    ) : null;
+                  })()}
                 </div>
               </div>
             );

@@ -23,6 +23,34 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
+const imageFileFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) {
+    cb(null, true);
+  } else {
+    cb(new Error('Only image files are allowed. Please provide cloud links (e.g. Google Drive) for videos.'), false);
+  }
+};
+
+const imageUpload = multer({ 
+  storage: storage, 
+  fileFilter: imageFileFilter,
+  limits: { fileSize: 10 * 1024 * 1024 }
+});
+
+// Image Upload Endpoint (Up to 10 images)
+router.post('/upload-images', (req, res) => {
+  imageUpload.array('images', 10)(req, res, (err) => {
+    if (err) {
+      return res.status(400).json({ error: err.message || 'Image upload failed.' });
+    }
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'No image files uploaded.' });
+    }
+    const filePaths = req.files.map(f => `/uploads/${f.filename}`);
+    res.json({ images: filePaths, count: filePaths.length });
+  });
+});
+
 // --- AUTH & USERS ---
 
 // Signup
@@ -88,13 +116,24 @@ router.get('/users', async (req, res) => {
 router.post('/projects', async (req, res) => {
   try {
     const { name, description, deliveryDate, status, totalRevenue, paymentReceived, pendingPayment, teamMembers } = req.body;
-    if (!name || !deliveryDate) {
-      return res.status(400).json({ error: 'Project name and delivery date are required.' });
+    if (!name || !name.trim()) {
+      return res.status(400).json({ error: 'Project name is required.' });
     }
+
+    const trimmedName = name.trim();
+    const escapedName = trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const existingProject = await Project.findOne({
+      name: { $regex: new RegExp(`^${escapedName}$`, 'i') }
+    });
+
+    if (existingProject) {
+      return res.status(400).json({ error: 'A project with this name already exists. Please choose a unique name.' });
+    }
+
     const project = new Project({
-      name,
+      name: trimmedName,
       description,
-      deliveryDate,
+      deliveryDate: deliveryDate ? new Date(deliveryDate) : undefined,
       status: status || 'In Progress',
       totalRevenue: Number(totalRevenue) || 0,
       paymentReceived: Number(paymentReceived) || 0,
@@ -216,9 +255,26 @@ router.put('/projects/:id', async (req, res) => {
       return res.status(404).json({ error: 'Project not found' });
     }
 
-    if (name) project.name = name;
+    if (name !== undefined) {
+      const trimmedName = name.trim();
+      if (!trimmedName) {
+        return res.status(400).json({ error: 'Project name cannot be empty.' });
+      }
+      const escapedName = trimmedName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const existingProject = await Project.findOne({
+        _id: { $ne: req.params.id },
+        name: { $regex: new RegExp(`^${escapedName}$`, 'i') }
+      });
+      if (existingProject) {
+        return res.status(400).json({ error: 'A project with this name already exists. Please choose a unique name.' });
+      }
+      project.name = trimmedName;
+    }
+
     if (description !== undefined) project.description = description;
-    if (deliveryDate) project.deliveryDate = deliveryDate;
+    if (deliveryDate !== undefined) {
+      project.deliveryDate = deliveryDate ? new Date(deliveryDate) : undefined;
+    }
     if (status) project.status = status;
     if (totalRevenue !== undefined) project.totalRevenue = Number(totalRevenue) || 0;
     if (paymentReceived !== undefined) project.paymentReceived = Number(paymentReceived) || 0;
@@ -525,7 +581,7 @@ router.delete('/projects/:id/change-requests/:crId', async (req, res) => {
 // Create Ticket (PM only in concept)
 router.post('/projects/:id/tickets', async (req, res) => {
   try {
-    const { task, ticketType, priority, description, figmaRef, deadline, tags, createdBy, status } = req.body;
+    const { task, ticketType, priority, description, figmaRef, deadline, tags, images, createdBy, status } = req.body;
     if (!task || !description) {
       return res.status(400).json({ error: 'Task title and description are required.' });
     }
@@ -542,6 +598,7 @@ router.post('/projects/:id/tickets', async (req, res) => {
       figmaRef,
       deadline,
       tags: tags || [],
+      images: images || [],
       status: status || 'To be started',
       history: [{
         user: createdBy || 'System',
@@ -602,8 +659,17 @@ router.put('/tickets/:id', async (req, res) => {
     if (priority) ticket.priority = priority;
     if (req.body.description) ticket.description = req.body.description;
     if (req.body.figmaRef !== undefined) ticket.figmaRef = req.body.figmaRef;
-    if (req.body.deadline) ticket.deadline = req.body.deadline;
-    if (req.body.tags) ticket.tags = req.body.tags;
+    if (req.body.deadline !== undefined) ticket.deadline = req.body.deadline;
+    if (req.body.images !== undefined) ticket.images = req.body.images;
+    if (req.body.tags !== undefined) {
+      ticket.tags = req.body.tags;
+      if (req.body.tagAction) {
+        ticket.history.push({
+          user: userName || 'Unknown User',
+          action: req.body.tagAction
+        });
+      }
+    }
 
     await ticket.save();
     res.json(ticket);
@@ -629,9 +695,9 @@ router.delete('/tickets/:id', async (req, res) => {
 // Add comment to ticket
 router.post('/tickets/:id/comments', async (req, res) => {
   try {
-    const { user, comment, parentId } = req.body;
-    if (!user || !comment) {
-      return res.status(400).json({ error: 'User and comment text are required.' });
+    const { user, comment, images, parentId } = req.body;
+    if (!user || (!comment && (!images || images.length === 0))) {
+      return res.status(400).json({ error: 'User and comment text or images are required.' });
     }
 
     const ticket = await Ticket.findById(req.params.id);
@@ -639,7 +705,12 @@ router.post('/tickets/:id/comments', async (req, res) => {
       return res.status(404).json({ error: 'Ticket not found.' });
     }
 
-    ticket.comments.push({ user, comment, parentId: parentId || null });
+    ticket.comments.push({ 
+      user, 
+      comment: comment || '', 
+      images: images || [],
+      parentId: parentId || null 
+    });
     await ticket.save();
     res.status(201).json(ticket);
   } catch (error) {

@@ -13,7 +13,7 @@ function CustomDatePicker({ value, onChange }) {
   };
 
   const formatUserDisplay = (dateStr) => {
-    if (!dateStr) return 'Select Delivery Date';
+    if (!dateStr) return 'Select Delivery Date (Optional)';
     const [y, m, d] = dateStr.split('-');
     const date = new Date(y, m - 1, d);
     return date.toLocaleDateString('en-US', { 
@@ -84,8 +84,29 @@ function CustomDatePicker({ value, onChange }) {
         onClick={() => setIsOpen(!isOpen)}
         style={styles.dateTrigger}
       >
-        <span>📅 {formatUserDisplay(value)}</span>
-        <span style={styles.caret}>{isOpen ? '▲' : '▼'}</span>
+        <span style={{ color: value ? 'inherit' : 'var(--text-secondary)' }}>📅 {formatUserDisplay(value)}</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          {value && (
+            <span
+              onClick={(e) => {
+                e.stopPropagation();
+                onChange('');
+              }}
+              style={{
+                fontSize: '12px',
+                color: 'var(--text-secondary)',
+                padding: '2px 6px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                backgroundColor: 'rgba(15, 23, 42, 0.06)'
+              }}
+              title="Clear date"
+            >
+              ✕ Clear
+            </span>
+          )}
+          <span style={styles.caret}>{isOpen ? '▲' : '▼'}</span>
+        </div>
       </div>
 
       {isOpen && (
@@ -395,8 +416,8 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!name || !deliveryDate) {
-      setError('Project name and delivery date are required');
+    if (!name || !name.trim()) {
+      setError('Project name is required');
       return;
     }
 
@@ -417,9 +438,9 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
         method,
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
-          description,
-          deliveryDate,
+          name: name.trim(),
+          description: description?.trim() || '',
+          deliveryDate: deliveryDate || null,
           totalRevenue: Number(totalRevenue) || 0,
           paymentReceived: Number(paymentReceived) || 0,
           pendingPayment: Number(pendingPayment) || 0,
@@ -486,7 +507,9 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit }
           </div>
 
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>Delivery Date</label>
+            <label style={styles.inputLabel}>
+              Delivery Date <span style={{ color: 'var(--text-secondary)', fontWeight: '400', fontSize: '0.85em' }}>(Optional)</span>
+            </label>
             <CustomDatePicker
               value={deliveryDate}
               onChange={setDeliveryDate}

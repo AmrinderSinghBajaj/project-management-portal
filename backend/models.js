@@ -23,7 +23,7 @@ const UserSchema = new mongoose.Schema({
 const ProjectSchema = new mongoose.Schema({
   name: { type: String, required: true },
   description: { type: String },
-  deliveryDate: { type: Date, required: true },
+  deliveryDate: { type: Date },
   status: { 
     type: String, 
     enum: ['In Progress', 'Live', 'On Hold', 'Testing', 'Completed'], 
@@ -92,6 +92,7 @@ const TicketSchema = new mongoose.Schema({
   figmaRef: { type: String },
   deadline: { type: Date },
   tags: [{ type: String }],
+  images: [{ type: String }],
   status: { 
     type: String, 
     default: 'To be started'
@@ -99,6 +100,7 @@ const TicketSchema = new mongoose.Schema({
   comments: [{
     user: { type: String, required: true },
     comment: { type: String, required: true },
+    images: [{ type: String }],
     timestamp: { type: Date, default: Date.now },
     parentId: { type: String, default: null },
     reactions: {

@@ -73,6 +73,11 @@ export default function App() {
         if (!res.ok) throw new Error('Failed to load project details');
         const data = await res.json();
         setActiveProjectData(data);
+        setSelectedTicket(prev => {
+          if (!prev) return null;
+          const updated = data.tickets?.find(t => t._id === prev._id);
+          return updated || prev;
+        });
       } catch (err) {
         console.error(err);
       }

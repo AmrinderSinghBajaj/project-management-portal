@@ -1,17 +1,29 @@
-import React, { useState } from 'react';
-import { API_BASE } from '../config';
+import React, { useState, useEffect, useRef } from 'react';
+import { API_BASE, SERVER_BASE } from '../config';
+import { 
+  isVideoFile, 
+  isImageFile, 
+  compressImageFile, 
+  uploadImagesToServer, 
+  formatFileSize, 
+  getFullImageUrl 
+} from '../utils/imageUtils';
+import ImageGalleryLightbox from './ImageGalleryLightbox';
+import VideoPromptModal from './VideoPromptModal';
 
-const ALL_TECH_TAGS = ['android', 'ios', 'backend', 'angular', 'design', 'react', 'flutter', 'python'];
+const ALL_TECH_TAGS = ['android', 'ios', 'backend', 'flutter', 'react', 'angular', 'python', 'design', 'qa', 'fullstack'];
 
 const TAG_STYLES = {
   android: { bg: 'rgba(16, 185, 129, 0.1)', color: '#047857', border: 'rgba(16, 185, 129, 0.25)' },
   ios: { bg: 'rgba(59, 130, 246, 0.1)', color: '#1d4ed8', border: 'rgba(59, 130, 246, 0.25)' },
   backend: { bg: 'rgba(124, 58, 237, 0.1)', color: '#6d28d9', border: 'rgba(124, 58, 237, 0.25)' },
-  angular: { bg: 'rgba(239, 68, 68, 0.1)', color: '#b91c1c', border: 'rgba(239, 68, 68, 0.25)' },
-  react: { bg: 'rgba(6, 182, 212, 0.1)', color: '#0e7490', border: 'rgba(6, 182, 212, 0.25)' },
-  design: { bg: 'rgba(236, 72, 153, 0.1)', color: '#be185d', border: 'rgba(236, 72, 153, 0.25)' },
   flutter: { bg: 'rgba(2, 132, 199, 0.1)', color: '#0369a1', border: 'rgba(2, 132, 199, 0.25)' },
+  react: { bg: 'rgba(6, 182, 212, 0.1)', color: '#0e7490', border: 'rgba(6, 182, 212, 0.25)' },
+  angular: { bg: 'rgba(239, 68, 68, 0.1)', color: '#b91c1c', border: 'rgba(239, 68, 68, 0.25)' },
   python: { bg: 'rgba(245, 158, 11, 0.1)', color: '#b45309', border: 'rgba(245, 158, 11, 0.25)' },
+  design: { bg: 'rgba(236, 72, 153, 0.1)', color: '#be185d', border: 'rgba(236, 72, 153, 0.25)' },
+  qa: { bg: 'rgba(16, 185, 129, 0.1)', color: '#059669', border: 'rgba(16, 185, 129, 0.25)' },
+  fullstack: { bg: 'rgba(99, 102, 241, 0.1)', color: '#4338ca', border: 'rgba(99, 102, 241, 0.25)' },
 };
 
 const getInitials = (name) => {
@@ -96,6 +108,7 @@ const renderTextWithLinks = (text) => {
 };
 
 export default function TicketDetailModal({ ticket, columns = [], currentUser, teamMembers = [], onClose, onRefresh }) {
+  const [localTicket, setLocalTicket] = useState(ticket);
   const [newComment, setNewComment] = useState('');
   const [commenting, setCommenting] = useState(false);
   const [showTooltip, setShowTooltip] = useState(false);
@@ -114,10 +127,37 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
   const [editPriority, setEditPriority] = useState(ticket.priority || 'Medium');
   const [editFigma, setEditFigma] = useState(ticket.figmaRef || '');
   const [editDeadline, setEditDeadline] = useState(ticket.deadline ? ticket.deadline.slice(0, 10) : '');
+  const [editImages, setEditImages] = useState(ticket.images || []);
+  const editImageFileInputRef = useRef(null);
+  const [isEditDragOver, setIsEditDragOver] = useState(false);
+  const [isCompressingEditImages, setIsCompressingEditImages] = useState(false);
+
+  // Lightbox & Video Modal
+  const [lightboxImages, setLightboxImages] = useState([]);
+  const [lightboxIndex, setLightboxIndex] = useState(0);
+  const [isLightboxOpen, setIsLightboxOpen] = useState(false);
+  const [showVideoPrompt, setShowVideoPrompt] = useState(false);
+
+  // Comment images
+  const [commentImages, setCommentImages] = useState([]);
+  const commentFileInputRef = useRef(null);
+  const [isCompressingCommentImages, setIsCompressingCommentImages] = useState(false);
+  const [isCommentDragOver, setIsCommentDragOver] = useState(false);
 
   const [hoveredCommentId, setHoveredCommentId] = useState(null);
   const [replyingToCommentId, setReplyingToCommentId] = useState(null);
   const [replyText, setReplyText] = useState('');
+
+  useEffect(() => {
+    setLocalTicket(ticket);
+    setEditTask(ticket.task || '');
+    setEditDesc(ticket.description || '');
+    setEditType(ticket.ticketType || 'Task');
+    setEditPriority(ticket.priority || 'Medium');
+    setEditFigma(ticket.figmaRef || '');
+    setEditDeadline(ticket.deadline ? ticket.deadline.slice(0, 10) : '');
+    setEditImages(ticket.images || []);
+  }, [ticket]);
 
   const getReactionLabel = (emoji) => {
     switch (emoji) {
@@ -144,7 +184,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
     if (!replyText.trim()) return;
 
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}/comments`, {
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -154,6 +194,8 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
         })
       });
       if (!res.ok) throw new Error('Failed to post reply');
+      const updated = await res.json();
+      setLocalTicket(updated);
       setReplyText('');
       setReplyingToCommentId(null);
       onRefresh();
@@ -164,12 +206,14 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
 
   const handleReact = async (commentId, emoji) => {
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}/comments/${commentId}/react`, {
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}/comments/${commentId}/react`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ emoji, user: currentUser.name })
       });
       if (!res.ok) throw new Error('Failed to react to comment');
+      const updated = await res.json();
+      setLocalTicket(updated);
       onRefresh();
     } catch (err) {
       alert(err.message);
@@ -177,7 +221,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
   };
 
   const handleStatusChange = async (newStatus) => {
-    const currentStatusLower = (ticket.status || '').toLowerCase();
+    const currentStatusLower = (localTicket.status || '').toLowerCase();
     const newStatusLower = (newStatus || '').toLowerCase();
 
     // Check if moving out of Ready for Testing by developer
@@ -194,8 +238,11 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
       }
     }
 
+    // Optimistic status update
+    setLocalTicket(prev => ({ ...prev, status: newStatus }));
+
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}`, {
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -208,15 +255,19 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
         const errData = await res.json();
         throw new Error(errData.error || 'Failed to update status');
       }
+      const updated = await res.json();
+      setLocalTicket(updated);
       onRefresh();
     } catch (err) {
+      setLocalTicket(prev => ({ ...prev, status: ticket.status }));
       alert(err.message);
     }
   };
 
   const handleTypeChange = async (newType) => {
+    setLocalTicket(prev => ({ ...prev, ticketType: newType }));
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}`, {
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -225,15 +276,19 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
         })
       });
       if (!res.ok) throw new Error('Failed to update ticket type');
+      const updated = await res.json();
+      setLocalTicket(updated);
       onRefresh();
     } catch (err) {
+      setLocalTicket(prev => ({ ...prev, ticketType: ticket.ticketType }));
       alert(err.message);
     }
   };
 
   const handlePriorityChange = async (newPriority) => {
+    setLocalTicket(prev => ({ ...prev, priority: newPriority }));
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}`, {
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -242,22 +297,28 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
         })
       });
       if (!res.ok) throw new Error('Failed to update priority');
+      const updated = await res.json();
+      setLocalTicket(updated);
       onRefresh();
     } catch (err) {
+      setLocalTicket(prev => ({ ...prev, priority: ticket.priority }));
       alert(err.message);
     }
   };
 
   const handleToggleTechTag = async (tag) => {
     const tagLower = tag.toLowerCase();
-    const currentTags = ticket.tags || [];
+    const currentTags = localTicket.tags || [];
     const isTagged = currentTags.some(t => t.toLowerCase() === tagLower);
     const newTags = isTagged
       ? currentTags.filter(t => t.toLowerCase() !== tagLower)
       : [...currentTags, tag];
 
+    // Immediate UI feedback
+    setLocalTicket(prev => ({ ...prev, tags: newTags }));
+
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}`, {
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -266,10 +327,159 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
           userName: currentUser.name 
         })
       });
-      if (!res.ok) throw new Error('Failed to update tech teams');
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || 'Failed to update tech teams');
+      }
+      const updated = await res.json();
+      setLocalTicket(updated);
       onRefresh();
     } catch (err) {
+      setLocalTicket(prev => ({ ...prev, tags: currentTags }));
       alert(err.message);
+    }
+  };
+
+  const handleProcessIncomingEditImages = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    if (files.some(f => isVideoFile(f))) {
+      setShowVideoPrompt(true);
+    }
+
+    const imageFiles = files.filter(f => isImageFile(f));
+    if (imageFiles.length === 0) return;
+
+    const availableSlots = 7 - editImages.length;
+    if (availableSlots <= 0) {
+      alert('Maximum 7 images allowed per ticket.');
+      return;
+    }
+
+    const filesToProcess = imageFiles.slice(0, availableSlots);
+    if (imageFiles.length > availableSlots) {
+      alert(`Only ${availableSlots} more image(s) could be added (max 7 images per ticket).`);
+    }
+
+    setIsCompressingEditImages(true);
+    try {
+      const processedObjects = await Promise.all(
+        filesToProcess.map(async (f) => {
+          const originalSize = f.size;
+          let fileToUse = f;
+          let isCompressed = false;
+
+          if (f.size > 2 * 1024 * 1024) {
+            fileToUse = await compressImageFile(f, 1024 * 1024);
+            isCompressed = true;
+          }
+
+          return {
+            isNew: true,
+            file: fileToUse,
+            previewUrl: URL.createObjectURL(fileToUse),
+            isCompressed,
+            originalSize,
+            compressedSize: fileToUse.size,
+            name: fileToUse.name
+          };
+        })
+      );
+
+      setEditImages(prev => [...prev, ...processedObjects]);
+    } catch (err) {
+      console.error('Error processing edit images:', err);
+    } finally {
+      setIsCompressingEditImages(false);
+    }
+  };
+
+  const handleRemoveEditImage = (index) => {
+    setEditImages(prev => {
+      const copy = [...prev];
+      const target = copy[index];
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      copy.splice(index, 1);
+      return copy;
+    });
+  };
+
+  const handleProcessIncomingCommentImages = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    if (files.some(f => isVideoFile(f))) {
+      setShowVideoPrompt(true);
+    }
+
+    const imageFiles = files.filter(f => isImageFile(f));
+    if (imageFiles.length === 0) return;
+
+    const availableSlots = 7 - commentImages.length;
+    if (availableSlots <= 0) {
+      alert('Maximum 7 images allowed per comment.');
+      return;
+    }
+
+    const filesToProcess = imageFiles.slice(0, availableSlots);
+    if (imageFiles.length > availableSlots) {
+      alert(`Only ${availableSlots} more image(s) could be added (max 7 images per comment).`);
+    }
+
+    setIsCompressingCommentImages(true);
+    try {
+      const processedObjects = await Promise.all(
+        filesToProcess.map(async (f) => {
+          const originalSize = f.size;
+          let fileToUse = f;
+          let isCompressed = false;
+
+          if (f.size > 2 * 1024 * 1024) {
+            fileToUse = await compressImageFile(f, 1024 * 1024);
+            isCompressed = true;
+          }
+
+          return {
+            file: fileToUse,
+            previewUrl: URL.createObjectURL(fileToUse),
+            isCompressed,
+            originalSize,
+            compressedSize: fileToUse.size,
+            name: fileToUse.name
+          };
+        })
+      );
+
+      setCommentImages(prev => [...prev, ...processedObjects]);
+    } catch (err) {
+      console.error('Error processing comment images:', err);
+    } finally {
+      setIsCompressingCommentImages(false);
+    }
+  };
+
+  const handleRemoveCommentImage = (index) => {
+    setCommentImages(prev => {
+      const copy = [...prev];
+      if (copy[index]?.previewUrl) {
+        URL.revokeObjectURL(copy[index].previewUrl);
+      }
+      copy.splice(index, 1);
+      return copy;
+    });
+  };
+
+  const handleCommentPaste = (e) => {
+    if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+      const files = Array.from(e.clipboardData.files);
+      const imageFiles = files.filter(f => isImageFile(f));
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        handleProcessIncomingCommentImages(imageFiles);
+      }
     }
   };
 
@@ -280,7 +490,17 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}`, {
+      const existingPaths = editImages.filter(item => typeof item === 'string');
+      const newItems = editImages.filter(item => typeof item !== 'string' && item.file);
+
+      let newlyUploaded = [];
+      if (newItems.length > 0) {
+        newlyUploaded = await uploadImagesToServer(newItems.map(item => item.file));
+      }
+
+      const finalImages = [...existingPaths, ...newlyUploaded];
+
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -290,11 +510,15 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
           deadline: editDeadline || null,
           ticketType: editType,
           priority: editPriority,
+          images: finalImages,
           isEditAction: true,
           userName: currentUser.name 
         })
       });
       if (!res.ok) throw new Error('Failed to update ticket details');
+      const updated = await res.json();
+      setLocalTicket(updated);
+      setEditImages(updated.images || []);
       setIsEditing(false);
       onRefresh();
     } catch (err) {
@@ -307,7 +531,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
       return;
     }
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}`, {
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}`, {
         method: 'DELETE'
       });
       if (!res.ok) throw new Error('Failed to delete ticket');
@@ -320,20 +544,30 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
 
   const handleAddComment = async (e) => {
     e.preventDefault();
-    if (!newComment.trim()) return;
+    if (!newComment.trim() && commentImages.length === 0) return;
 
     setCommenting(true);
     try {
-      const res = await fetch(`${API_BASE}/tickets/${ticket._id}/comments`, {
+      let uploadedImagePaths = [];
+      if (commentImages.length > 0) {
+        const rawFiles = commentImages.map(img => img.file);
+        uploadedImagePaths = await uploadImagesToServer(rawFiles);
+      }
+
+      const res = await fetch(`${API_BASE}/tickets/${localTicket._id}/comments`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           user: currentUser.name,
-          comment: newComment.trim()
+          comment: newComment.trim(),
+          images: uploadedImagePaths
         })
       });
       if (!res.ok) throw new Error('Failed to post comment');
+      const updated = await res.json();
+      setLocalTicket(updated);
       setNewComment('');
+      setCommentImages([]);
       onRefresh();
     } catch (err) {
       alert(err.message);
@@ -367,20 +601,20 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
         {/* Header */}
         <div style={styles.header}>
           <div style={styles.headerTitleGroup}>
-            <span style={styles.ticketIdLabel}>ID: #{ticket._id ? ticket._id.slice(-6).toUpperCase() : ''}</span>
-            <h3 style={styles.title}>{ticket.task}</h3>
+            <span style={styles.ticketIdLabel}>ID: #{localTicket._id ? localTicket._id.slice(-6).toUpperCase() : ''}</span>
+            <h3 style={styles.title}>{localTicket.task}</h3>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'QA', 'Quality Analyst (QA)', 'CEO', 'Delivery Head'].includes(currentUser.role) && !isEditing && (
               <button 
                 type="button"
                 onClick={() => {
-                  setEditTask(ticket.task || '');
-                  setEditDesc(ticket.description || '');
-                  setEditType(ticket.ticketType || 'Task');
-                  setEditPriority(ticket.priority || 'Medium');
-                  setEditFigma(ticket.figmaRef || '');
-                  setEditDeadline(ticket.deadline ? ticket.deadline.slice(0, 10) : '');
+                  setEditTask(localTicket.task || '');
+                  setEditDesc(localTicket.description || '');
+                  setEditType(localTicket.ticketType || 'Task');
+                  setEditPriority(localTicket.priority || 'Medium');
+                  setEditFigma(localTicket.figmaRef || '');
+                  setEditDeadline(localTicket.deadline ? localTicket.deadline.slice(0, 10) : '');
                   setIsEditing(true);
                 }}
                 title="Edit Ticket Details"
@@ -500,19 +734,163 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                     required
                   />
                 </div>
+
+                {/* Edit Mode Image Attachments */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label style={styles.formLabel}>Image Attachments ({editImages.length}/7)</label>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Drag & drop, paste, or browse</span>
+                  </div>
+
+                  <input
+                    type="file"
+                    ref={editImageFileInputRef}
+                    onChange={(e) => {
+                      if (e.target.files && e.target.files.length > 0) {
+                        handleProcessIncomingEditImages(e.target.files);
+                        e.target.value = '';
+                      }
+                    }}
+                    accept="image/*"
+                    multiple
+                    style={{ display: 'none' }}
+                  />
+
+                  <div
+                    onClick={() => editImageFileInputRef.current?.click()}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      setIsEditDragOver(true);
+                    }}
+                    onDragLeave={() => setIsEditDragOver(false)}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      setIsEditDragOver(false);
+                      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                        handleProcessIncomingEditImages(e.dataTransfer.files);
+                      }
+                    }}
+                    onPaste={(e) => {
+                      if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+                        const imageFiles = Array.from(e.clipboardData.files).filter(f => isImageFile(f));
+                        if (imageFiles.length > 0) {
+                          e.preventDefault();
+                          handleProcessIncomingEditImages(imageFiles);
+                        }
+                      }
+                    }}
+                    style={{
+                      border: isEditDragOver ? '2px dashed var(--accent-blue, #2563eb)' : '2px dashed #cbd5e1',
+                      backgroundColor: isEditDragOver ? 'rgba(37, 99, 235, 0.05)' : '#ffffff',
+                      borderRadius: '8px',
+                      padding: '12px',
+                      textAlign: 'center',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                    }}
+                  >
+                    <div style={{ fontSize: '16px', marginBottom: '2px' }}>🖼️</div>
+                    <div style={{ fontSize: '12.5px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                      Click to upload images, drag & drop, or paste (Ctrl+V)
+                    </div>
+                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
+                      Max 7 images • Auto-compressed if &gt; 2MB
+                    </div>
+                  </div>
+
+                  {isCompressingEditImages && (
+                    <div style={{ fontSize: '12px', color: 'var(--accent-blue)', fontWeight: '500' }}>
+                      ⏳ Optimizing and compressing images...
+                    </div>
+                  )}
+
+                  {/* Staged Edit Images */}
+                  {editImages.length > 0 && (
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
+                      {editImages.map((imgItem, idx) => {
+                        const isString = typeof imgItem === 'string';
+                        const previewSrc = isString ? getFullImageUrl(imgItem) : imgItem.previewUrl;
+                        return (
+                          <div
+                            key={idx}
+                            style={{
+                              position: 'relative',
+                              width: '68px',
+                              height: '68px',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              border: '1px solid #cbd5e1',
+                              backgroundColor: '#f1f5f9'
+                            }}
+                          >
+                            <img
+                              src={previewSrc}
+                              alt={`Attachment ${idx + 1}`}
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            />
+                            {!isString && imgItem.isCompressed && (
+                              <span
+                                style={{
+                                  position: 'absolute',
+                                  bottom: '2px',
+                                  left: '2px',
+                                  backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                                  color: '#ffffff',
+                                  fontSize: '8.5px',
+                                  fontWeight: '700',
+                                  padding: '1px 3px',
+                                  borderRadius: '3px'
+                                }}
+                              >
+                                ~1MB
+                              </span>
+                            )}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleRemoveEditImage(idx);
+                              }}
+                              style={{
+                                position: 'absolute',
+                                top: '2px',
+                                right: '2px',
+                                backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                                color: '#ffffff',
+                                border: 'none',
+                                borderRadius: '50%',
+                                width: '18px',
+                                height: '18px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                fontSize: '10px',
+                                cursor: 'pointer',
+                                padding: 0
+                              }}
+                              title="Remove image"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
               </form>
             ) : (
               <>
                 <div style={styles.section}>
                   <h4 style={styles.sectionTitle}>Description</h4>
-                  <p style={styles.description}>{renderTextWithLinks(ticket.description)}</p>
+                  <p style={styles.description}>{renderTextWithLinks(localTicket.description)}</p>
                 </div>
 
-                {ticket.figmaRef && (
+                {localTicket.figmaRef && (
                   <div style={styles.section}>
                     <h4 style={styles.sectionTitle}>Figma Reference</h4>
                     <a 
-                      href={ticket.figmaRef} 
+                      href={localTicket.figmaRef} 
                       target="_blank" 
                       rel="noopener noreferrer" 
                       style={styles.figmaLink}
@@ -521,18 +899,50 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                     </a>
                   </div>
                 )}
+
+                {/* Ticket Attachments Gallery */}
+                {localTicket.images && localTicket.images.length > 0 && (
+                  <div style={styles.section}>
+                    <h4 style={styles.sectionTitle}>
+                      Attachments ({localTicket.images.length})
+                    </h4>
+                    <div style={styles.imageGalleryGrid}>
+                      {localTicket.images.map((imgPath, idx) => (
+                        <div 
+                          key={idx} 
+                          onClick={() => {
+                            setLightboxImages(localTicket.images);
+                            setLightboxIndex(idx);
+                            setIsLightboxOpen(true);
+                          }}
+                          style={styles.galleryThumbWrapper}
+                          title="Click to view full size"
+                        >
+                          <img 
+                            src={getFullImageUrl(imgPath)} 
+                            alt={`Attachment ${idx + 1}`} 
+                            style={styles.galleryThumbImg}
+                          />
+                          <div style={styles.zoomHoverOverlay}>
+                            🔍
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </>
             )}
 
             {/* Discussion Feed (Comments) */}
-            {ticket.comments && ticket.comments.length > 0 && (
+            {localTicket.comments && localTicket.comments.length > 0 && (
               <div style={styles.discussionSection}>
                 <h4 style={styles.sectionTitle}>Discussion Feed</h4>
                 
                 <div style={styles.commentsList}>
                   {(() => {
-                    const topLevelComments = (ticket.comments || []).filter(c => !c.parentId);
-                    const repliesByParentId = (ticket.comments || []).reduce((acc, c) => {
+                    const topLevelComments = (localTicket.comments || []).filter(c => !c.parentId);
+                    const repliesByParentId = (localTicket.comments || []).reduce((acc, c) => {
                       if (c.parentId) {
                         if (!acc[c.parentId]) acc[c.parentId] = [];
                         acc[c.parentId].push(c);
@@ -586,6 +996,28 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                                 </span>
                               </div>
                               <div style={styles.commentBody}>{renderTextWithLinks(comm.comment)}</div>
+                              {comm.images && comm.images.length > 0 && (
+                                <div style={styles.commentImagesGrid}>
+                                  {comm.images.map((cImg, cIdx) => (
+                                    <div
+                                      key={cIdx}
+                                      onClick={() => {
+                                        setLightboxImages(comm.images);
+                                        setLightboxIndex(cIdx);
+                                        setIsLightboxOpen(true);
+                                      }}
+                                      style={styles.commentThumbWrapper}
+                                      title="Click to view image"
+                                    >
+                                      <img
+                                        src={getFullImageUrl(cImg)}
+                                        alt={`Comment image ${cIdx + 1}`}
+                                        style={styles.commentThumbImg}
+                                      />
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                             </div>
                             
                             {/* Action panel underneath the bubble */}
@@ -728,8 +1160,31 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                                           </span>
                                         </div>
                                         <div style={styles.commentBody}>{renderTextWithLinks(reply.comment)}</div>
+                                        {reply.images && reply.images.length > 0 && (
+                                          <div style={styles.commentImagesGrid}>
+                                            {reply.images.map((rImg, rIdx) => (
+                                              <div
+                                                key={rIdx}
+                                                onClick={() => {
+                                                  setLightboxImages(reply.images);
+                                                  setLightboxIndex(rIdx);
+                                                  setIsLightboxOpen(true);
+                                                }}
+                                                style={styles.commentThumbWrapper}
+                                                title="Click to view image"
+                                              >
+                                                <img
+                                                  src={getFullImageUrl(rImg)}
+                                                  alt={`Reply image ${rIdx + 1}`}
+                                                  style={styles.commentThumbImg}
+                                                />
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
                                       </div>
 
+                                      {/* Reply Action Bar */}
                                       <div style={styles.commentActionsBar}>
                                         <div 
                                           style={styles.likeBtnContainer}
@@ -776,30 +1231,27 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                                         </div>
 
                                         {reply.reactions && reply.reactions.length > 0 && (
-                                          <>
-                                            <span style={styles.dotSeparator}>•</span>
-                                            <div className="reactions-tooltip-trigger" style={styles.commentReactionsSummary}>
-                                              <span style={styles.reactionsSummaryEmojis}>
-                                                {reply.reactions.slice(0, 3).map(r => r.emoji).join('')}
-                                              </span>
-                                              <span style={styles.reactionsSummaryCount}>
-                                                {reply.reactions.reduce((sum, r) => sum + r.users.length, 0)}
-                                              </span>
-                                              <div className="reactions-tooltip-box">
-                                                {reply.reactions.map((r, idx) => {
-                                                  const formattedNames = r.users.length > 1
-                                                    ? `${r.users.slice(0, -1).join(', ')} and ${r.users[r.users.length - 1]}`
-                                                    : r.users[0];
-                                                  return (
-                                                    <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap', lineHeight: '1.4' }}>
-                                                      <span>{r.emoji}</span>
-                                                      <span style={{ color: '#cbd5e1' }}>{formattedNames}</span>
-                                                    </div>
-                                                  );
-                                                })}
-                                              </div>
+                                          <div className="reactions-tooltip-trigger" style={styles.commentReactionsSummary}>
+                                            <span style={styles.reactionsSummaryEmojis}>
+                                              {reply.reactions.slice(0, 3).map(r => r.emoji).join('')}
+                                            </span>
+                                            <span style={styles.reactionsSummaryCount}>
+                                              {reply.reactions.reduce((sum, r) => sum + r.users.length, 0)}
+                                            </span>
+                                            <div className="reactions-tooltip-box">
+                                              {reply.reactions.map((r, idx) => {
+                                                const formattedNames = r.users.length > 1
+                                                  ? `${r.users.slice(0, -1).join(', ')} and ${r.users[r.users.length - 1]}`
+                                                  : r.users[0];
+                                                return (
+                                                  <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '6px', whiteSpace: 'nowrap', lineHeight: '1.4' }}>
+                                                    <span>{r.emoji}</span>
+                                                    <span style={{ color: '#cbd5e1' }}>{formattedNames}</span>
+                                                  </div>
+                                                );
+                                              })}
                                             </div>
-                                          </>
+                                          </div>
                                         )}
                                       </div>
                                     </div>
@@ -845,39 +1297,147 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                     );
                   });
                 })()}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
           {/* Comment Form */}
-          <form onSubmit={handleAddComment} style={{ ...styles.commentForm, marginTop: (ticket.comments?.length > 0) ? '8px' : '0px' }}>
+          <form 
+            onSubmit={handleAddComment} 
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsCommentDragOver(true);
+            }}
+            onDragLeave={() => setIsCommentDragOver(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsCommentDragOver(false);
+              if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                handleProcessIncomingCommentImages(e.dataTransfer.files);
+              }
+            }}
+            style={{ 
+              ...styles.commentForm, 
+              marginTop: (localTicket.comments?.length > 0) ? '8px' : '0px',
+              border: isCommentDragOver ? '2px dashed var(--accent-blue, #2563eb)' : '1px solid var(--panel-border)',
+              backgroundColor: isCommentDragOver ? 'rgba(37, 99, 235, 0.03)' : 'transparent',
+              borderRadius: '10px',
+              padding: '10px',
+              transition: 'all 0.2s ease'
+            }}
+          >
+            <input
+              type="file"
+              ref={commentFileInputRef}
+              onChange={(e) => {
+                if (e.target.files && e.target.files.length > 0) {
+                  handleProcessIncomingCommentImages(e.target.files);
+                  e.target.value = '';
+                }
+              }}
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+            />
+
             <textarea
-              placeholder="Write a message to the team..."
+              placeholder="Write a message to the team or paste images (Ctrl+V)..."
               value={newComment}
               onChange={(e) => setNewComment(e.target.value)}
+              onPaste={handleCommentPaste}
               rows={2}
               style={styles.commentTextarea}
-              required
             />
-            <div style={styles.commentActions}>
-              <div style={{ position: 'relative' }}>
-                <button
-                  type="button"
-                  className="secondary"
-                  onMouseEnter={() => setShowTooltip(true)}
-                  onMouseLeave={() => setShowTooltip(false)}
-                  style={styles.attachmentBtn}
-                >
-                  📎 Attach Media
-                </button>
-                {showTooltip && (
-                  <div style={styles.tooltip}>
-                    Coming soon (DB limit)
-                  </div>
-                )}
-              </div>
 
-              <button type="submit" disabled={commenting} style={styles.postBtn}>
+            {isCompressingCommentImages && (
+              <div style={{ fontSize: '11px', color: 'var(--accent-blue)', marginTop: '4px', fontWeight: '500' }}>
+                ⏳ Optimizing image size...
+              </div>
+            )}
+
+            {/* Staged Comment Images Strip */}
+            {commentImages.length > 0 && (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '6px', marginBottom: '4px' }}>
+                {commentImages.map((cImg, idx) => (
+                  <div
+                    key={idx}
+                    style={{
+                      position: 'relative',
+                      width: '52px',
+                      height: '52px',
+                      borderRadius: '6px',
+                      overflow: 'hidden',
+                      border: '1px solid #cbd5e1',
+                      backgroundColor: '#f1f5f9'
+                    }}
+                  >
+                    <img
+                      src={cImg.previewUrl}
+                      alt={`Comment image ${idx + 1}`}
+                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                    />
+                    {cImg.isCompressed && (
+                      <span
+                        style={{
+                          position: 'absolute',
+                          bottom: '1px',
+                          left: '1px',
+                          backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                          color: '#ffffff',
+                          fontSize: '8px',
+                          fontWeight: '700',
+                          padding: '0 2px',
+                          borderRadius: '2px'
+                        }}
+                      >
+                        ~1MB
+                      </span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveCommentImage(idx)}
+                      style={{
+                        position: 'absolute',
+                        top: '1px',
+                        right: '1px',
+                        backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '50%',
+                        width: '16px',
+                        height: '16px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '9px',
+                        cursor: 'pointer',
+                        padding: 0
+                      }}
+                      title="Remove image"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={styles.commentActions}>
+              <button
+                type="button"
+                className="secondary"
+                onClick={() => commentFileInputRef.current?.click()}
+                style={styles.attachmentBtn}
+                title="Attach images (up to 7, auto compressed)"
+              >
+                📎 Attach Images {commentImages.length > 0 ? `(${commentImages.length}/7)` : ''}
+              </button>
+
+              <button 
+                type="submit" 
+                disabled={commenting || isCompressingCommentImages || (!newComment.trim() && commentImages.length === 0)} 
+                style={styles.postBtn}
+              >
                 {commenting ? 'Sending...' : 'Send'}
               </button>
             </div>
@@ -892,7 +1452,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                 onClick={() => setIsStatusOpen(!isStatusOpen)}
                 style={styles.statusTrigger}
               >
-                <span>{ticket.status}</span>
+                <span>{localTicket.status}</span>
                 <span style={styles.statusCaret}>{isStatusOpen ? '▲' : '▼'}</span>
               </div>
               
@@ -907,13 +1467,13 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                       { title: 'Tested' },
                       { title: 'Live' }
                     ]).map(col => {
-                      const isCurrentTesting = (ticket.status || '').toLowerCase().includes('ready') && (ticket.status || '').toLowerCase().includes('testing');
+                      const isCurrentTesting = (localTicket.status || '').toLowerCase().includes('ready') && (localTicket.status || '').toLowerCase().includes('testing');
                       const r = (currentUser?.role || '').toLowerCase();
                       const isAuthorized = r.includes('qa') || r.includes('tester') || r.includes('quality') || 
                                            r.includes('pm') || r.includes('project manager') || 
                                            r.includes('pc') || r.includes('project coordinator') || 
                                            r.includes('delivery head') || r.includes('ceo');
-                      const isRestricted = isCurrentTesting && col.title !== ticket.status && !isAuthorized;
+                      const isRestricted = isCurrentTesting && col.title !== localTicket.status && !isAuthorized;
 
                       return (
                         <div
@@ -928,7 +1488,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                           }}
                           style={{
                             ...styles.statusOption,
-                            ...(ticket.status === col.title ? styles.activeStatusOption : {})
+                            ...(localTicket.status === col.title ? styles.activeStatusOption : {})
                           }}
                           className="dropdown-option"
                         >
@@ -947,7 +1507,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                 onClick={() => setIsTypeOpen(!isTypeOpen)}
                 style={styles.statusTrigger}
               >
-                <span>{ticket.ticketType === 'Feature' ? '✨ Feature' : ticket.ticketType === 'Bug' ? '🐞 Bug' : '📋 Task'}</span>
+                <span>{localTicket.ticketType === 'Feature' ? '✨ Feature' : localTicket.ticketType === 'Bug' ? '🐞 Bug' : '📋 Task'}</span>
                 <span style={styles.statusCaret}>{isTypeOpen ? '▲' : '▼'}</span>
               </div>
               
@@ -968,7 +1528,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                         }}
                         style={{
                           ...styles.statusOption,
-                          ...(ticket.ticketType === item.type ? styles.activeStatusOption : {})
+                          ...(localTicket.ticketType === item.type ? styles.activeStatusOption : {})
                         }}
                         className="dropdown-option"
                       >
@@ -986,7 +1546,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                 onClick={() => setIsPriorityOpen(!isPriorityOpen)}
                 style={styles.statusTrigger}
               >
-                <span>{ticket.priority === 'High' ? '🔴 High' : ticket.priority === 'Low' ? '🟢 Low' : '🟡 Medium'}</span>
+                <span>{localTicket.priority === 'High' ? '🔴 High' : localTicket.priority === 'Low' ? '🟢 Low' : '🟡 Medium'}</span>
                 <span style={styles.statusCaret}>{isPriorityOpen ? '▲' : '▼'}</span>
               </div>
               
@@ -1007,7 +1567,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                         }}
                         style={{
                           ...styles.statusOption,
-                          ...(ticket.priority === item.priority ? styles.activeStatusOption : {})
+                          ...(localTicket.priority === item.priority ? styles.activeStatusOption : {})
                         }}
                         className="dropdown-option"
                       >
@@ -1019,21 +1579,25 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
               )}
             </div>
 
-            {/* Tech Teams Dropdown (Toggleable by everyone) */}
+            {/* Tech Teams Dropdown (Toggleable by everyone on platform) */}
             <div style={styles.sidebarSection}>
-              <label style={styles.sidebarLabel}>TECH TEAMS ({ticket.tags?.length || 0})</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                <label style={styles.sidebarLabel}>TECH TEAMS ({(localTicket.tags || []).length})</label>
+                <span style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Click tag to toggle</span>
+              </div>
               <div 
                 onClick={() => setIsAddingTag(!isAddingTag)}
-                style={{ ...styles.statusTrigger, minHeight: '38px', flexWrap: 'wrap', gap: '4px' }}
+                style={{ ...styles.statusTrigger, minHeight: '38px', flexWrap: 'wrap', gap: '4px', cursor: 'pointer' }}
                 title="Click to tag or untag tech teams"
               >
-                {(ticket.tags || []).length === 0 ? (
+                {(localTicket.tags || []).length === 0 ? (
                   <span style={{ color: '#94a3b8' }}>Select Tech Teams...</span>
                 ) : (
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', flex: 1, minWidth: 0 }}>
-                    {(ticket.tags || []).map(tag => {
+                    {(localTicket.tags || []).map(tag => {
                       const tagKey = tag.toLowerCase();
                       const tagStyle = TAG_STYLES[tagKey] || { bg: 'rgba(148, 163, 184, 0.15)', color: '#334155', border: 'rgba(148, 163, 184, 0.3)' };
+                      const label = tag === 'ios' ? 'iOS' : tag === 'qa' ? 'QA' : tag === 'fullstack' ? 'Full Stack' : tag.charAt(0).toUpperCase() + tag.slice(1);
                       return (
                         <span 
                           key={tag} 
@@ -1041,10 +1605,10 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                             ...styles.tagPill,
                             backgroundColor: tagStyle.bg,
                             color: tagStyle.color,
-                            border: `1px solid ${tagStyle.border}`
+                            border: `1px solid ${tagStyle.border}`,
                           }}
                         >
-                          {tag === 'ios' ? 'iOS' : tag.charAt(0).toUpperCase() + tag.slice(1)}
+                          {label}
                         </span>
                       );
                     })}
@@ -1058,8 +1622,9 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                   <div style={styles.dropdownOverlay} onClick={() => setIsAddingTag(false)} />
                   <div style={styles.statusMenu} className="glass fade-in">
                     {ALL_TECH_TAGS.map(tag => {
-                      const isSelected = (ticket.tags || []).some(t => t.toLowerCase() === tag.toLowerCase());
-                      const label = tag === 'ios' ? 'iOS' : tag.charAt(0).toUpperCase() + tag.slice(1);
+                      const isSelected = (localTicket.tags || []).some(t => t.toLowerCase() === tag.toLowerCase());
+                      const label = tag === 'ios' ? 'iOS' : tag === 'qa' ? 'QA' : tag === 'fullstack' ? 'Full Stack' : tag.charAt(0).toUpperCase() + tag.slice(1);
+                      const tagStyle = TAG_STYLES[tag] || { color: '#64748b' };
                       return (
                         <div
                           key={tag}
@@ -1069,11 +1634,22 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                             ...(isSelected ? styles.activeStatusOption : {}),
                             display: 'flex',
                             justifyContent: 'space-between',
-                            alignItems: 'center'
+                            alignItems: 'center',
+                            cursor: 'pointer'
                           }}
                           className="dropdown-option"
                         >
-                          <span>{label}</span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <span 
+                              style={{
+                                width: '8px',
+                                height: '8px',
+                                borderRadius: '50%',
+                                backgroundColor: tagStyle.color || '#64748b'
+                              }}
+                            />
+                            <span style={{ fontWeight: isSelected ? '600' : '400' }}>{label}</span>
+                          </div>
                           {isSelected ? (
                             <span style={{ fontSize: '11px', color: 'var(--accent-blue)', fontWeight: '700' }}>✓ Tagged</span>
                           ) : (
@@ -1090,7 +1666,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
             <div style={styles.sidebarSection}>
               <label style={styles.sidebarLabel}>DEADLINE</label>
               <div style={styles.sidebarValue}>
-                {ticket.deadline ? formatDate(ticket.deadline) : 'No deadline set'}
+                {localTicket.deadline ? formatDate(localTicket.deadline) : 'No deadline set'}
               </div>
             </div>
 
@@ -1106,8 +1682,8 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
 
               {showActivity && (
                 <div style={styles.historyList}>
-                  {ticket.history && ticket.history.length > 0 ? (
-                    ticket.history.map((log, idx) => (
+                  {localTicket.history && localTicket.history.length > 0 ? (
+                    localTicket.history.map((log, idx) => (
                       <div key={idx} style={styles.historyItem}>
                         <div style={styles.historyDot} />
                         <div style={styles.historyDetails}>
@@ -1129,6 +1705,21 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
           </div>
         </div>
       </div>
+
+      {/* Lightbox for full screen viewing */}
+      {isLightboxOpen && (
+        <ImageGalleryLightbox 
+          images={lightboxImages} 
+          initialIndex={lightboxIndex} 
+          onClose={() => setIsLightboxOpen(false)} 
+        />
+      )}
+
+      {/* Video prompt modal */}
+      <VideoPromptModal 
+        isOpen={showVideoPrompt} 
+        onClose={() => setShowVideoPrompt(false)} 
+      />
     </div>
   );
 }
@@ -2019,5 +2610,65 @@ const styles = {
     border: '1px solid #cbd5e1',
     borderRadius: '6px',
     cursor: 'pointer',
+  },
+  imageGalleryGrid: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '10px',
+    marginTop: '8px',
+  },
+  galleryThumbWrapper: {
+    position: 'relative',
+    width: '100px',
+    height: '100px',
+    borderRadius: '10px',
+    overflow: 'hidden',
+    border: '1px solid #e2e8f0',
+    cursor: 'pointer',
+    backgroundColor: '#f8fafc',
+    boxShadow: '0 2px 6px rgba(0, 0, 0, 0.04)',
+    transition: 'all 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+  },
+  galleryThumbImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  zoomHoverOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.35)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    color: '#ffffff',
+    fontSize: '18px',
+    opacity: 0,
+    transition: 'opacity 0.2s ease',
+  },
+  commentImagesGrid: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: '8px',
+    marginTop: '8px',
+  },
+  commentThumbWrapper: {
+    width: '72px',
+    height: '72px',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    border: '1px solid rgba(15, 23, 42, 0.1)',
+    cursor: 'pointer',
+    backgroundColor: '#f8fafc',
+    boxShadow: '0 1px 4px rgba(0, 0, 0, 0.05)',
+    transition: 'transform 0.15s ease',
+  },
+  commentThumbImg: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
   },
 };

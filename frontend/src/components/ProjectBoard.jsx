@@ -1,5 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE, SERVER_BASE } from '../config';
+import { 
+  isVideoFile, 
+  isImageFile, 
+  compressImageFile, 
+  uploadImagesToServer, 
+  formatFileSize, 
+  getFullImageUrl 
+} from '../utils/imageUtils';
+import VideoPromptModal from './VideoPromptModal';
 
 const LINK_CATEGORIES = [
   'Live URL',
@@ -84,6 +93,11 @@ export default function ProjectBoard({
   const [ticketFigma, setTicketFigma] = useState('');
   const [ticketDeadline, setTicketDeadline] = useState('');
   const [ticketTags, setTicketTags] = useState([]);
+  const [ticketImages, setTicketImages] = useState([]);
+  const [isCompressingImages, setIsCompressingImages] = useState(false);
+  const [showVideoPrompt, setShowVideoPrompt] = useState(false);
+  const [isDragOverTicketDropzone, setIsDragOverTicketDropzone] = useState(false);
+  const ticketFileInputRef = useRef(null);
   const [isTicketTagsOpen, setIsTicketTagsOpen] = useState(false);
   const [isCrTagsOpen, setIsCrTagsOpen] = useState(false);
   const [ticketStatus, setTicketStatus] = useState('To be started');
@@ -333,6 +347,88 @@ Figma Reference Link:
     }
   };
 
+  const handleProcessIncomingTicketFiles = async (fileList) => {
+    if (!fileList || fileList.length === 0) return;
+    const files = Array.from(fileList);
+
+    // Check for video files
+    const hasVideo = files.some(f => isVideoFile(f));
+    if (hasVideo) {
+      setShowVideoPrompt(true);
+    }
+
+    // Filter only images
+    const imageFiles = files.filter(f => isImageFile(f));
+    if (imageFiles.length === 0) return;
+
+    // Limit to max 7 images total
+    const currentCount = ticketImages.length;
+    const availableSlots = 7 - currentCount;
+    if (availableSlots <= 0) {
+      alert('Maximum 7 images allowed per ticket.');
+      return;
+    }
+
+    const filesToProcess = imageFiles.slice(0, availableSlots);
+    if (imageFiles.length > availableSlots) {
+      alert(`Only ${availableSlots} more image(s) could be added (max 7 images per ticket).`);
+    }
+
+    setIsCompressingImages(true);
+    try {
+      const processedObjects = await Promise.all(
+        filesToProcess.map(async (f) => {
+          const originalSize = f.size;
+          let fileToUse = f;
+          let isCompressed = false;
+
+          // If over 2MB, compress down to ~1MB
+          if (f.size > 2 * 1024 * 1024) {
+            fileToUse = await compressImageFile(f, 1024 * 1024);
+            isCompressed = true;
+          }
+
+          return {
+            file: fileToUse,
+            previewUrl: URL.createObjectURL(fileToUse),
+            isCompressed,
+            originalSize,
+            compressedSize: fileToUse.size,
+            name: fileToUse.name
+          };
+        })
+      );
+
+      setTicketImages(prev => [...prev, ...processedObjects]);
+    } catch (err) {
+      console.error('Error processing images:', err);
+    } finally {
+      setIsCompressingImages(false);
+    }
+  };
+
+  const handleRemoveTicketImage = (index) => {
+    setTicketImages(prev => {
+      const copy = [...prev];
+      if (copy[index]?.previewUrl) {
+        URL.revokeObjectURL(copy[index].previewUrl);
+      }
+      copy.splice(index, 1);
+      return copy;
+    });
+  };
+
+  const handleTicketModalPaste = (e) => {
+    if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+      const files = Array.from(e.clipboardData.files);
+      const imageFiles = files.filter(f => isImageFile(f));
+      if (imageFiles.length > 0) {
+        e.preventDefault();
+        handleProcessIncomingTicketFiles(imageFiles);
+      }
+    }
+  };
+
   // Ticket creation handler
   const handleCreateTicket = async (e) => {
     e.preventDefault();
@@ -345,6 +441,12 @@ Figma Reference Link:
 
     setLoading(true);
     try {
+      let uploadedImagePaths = [];
+      if (ticketImages.length > 0) {
+        const rawFiles = ticketImages.map(img => img.file);
+        uploadedImagePaths = await uploadImagesToServer(rawFiles);
+      }
+
       const res = await fetch(`${API_BASE}/projects/${project._id}/tickets`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -356,6 +458,7 @@ Figma Reference Link:
           figmaRef: ticketFigma,
           deadline: ticketDeadline,
           tags: ticketTags,
+          images: uploadedImagePaths,
           createdBy: currentUser.name,
           status: ticketStatus
         })
@@ -370,6 +473,7 @@ Figma Reference Link:
       setTicketFigma('');
       setTicketDeadline('');
       setTicketTags([]);
+      setTicketImages([]);
       setShowAddTicket(false);
       onRefresh();
     } catch (err) {
@@ -1923,7 +2027,7 @@ Figma Reference Link:
                   value={ticketDesc}
                   onChange={(e) => setTicketDesc(e.target.value)}
                   style={{
-                    minHeight: '200px',
+                    minHeight: '160px',
                     padding: '12px 14px',
                     lineHeight: '1.5',
                     fontSize: '13px',
@@ -1938,11 +2042,147 @@ Figma Reference Link:
                 </span>
               </div>
 
+              {/* Image Attachments Section */}
+              <div style={styles.modalInputGroup}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={styles.formFieldLabel}>
+                    Image Attachments ({ticketImages.length}/7)
+                  </label>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                    Drag & drop, paste (Ctrl+V), or browse
+                  </span>
+                </div>
+
+                <input
+                  type="file"
+                  ref={ticketFileInputRef}
+                  onChange={(e) => {
+                    if (e.target.files && e.target.files.length > 0) {
+                      handleProcessIncomingTicketFiles(e.target.files);
+                      e.target.value = '';
+                    }
+                  }}
+                  accept="image/*"
+                  multiple
+                  style={{ display: 'none' }}
+                />
+
+                <div
+                  onClick={() => ticketFileInputRef.current?.click()}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragOverTicketDropzone(true);
+                  }}
+                  onDragLeave={() => setIsDragOverTicketDropzone(false)}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setIsDragOverTicketDropzone(false);
+                    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                      handleProcessIncomingTicketFiles(e.dataTransfer.files);
+                    }
+                  }}
+                  style={{
+                    border: isDragOverTicketDropzone ? '2px dashed var(--accent-blue, #2563eb)' : '2px dashed #cbd5e1',
+                    backgroundColor: isDragOverTicketDropzone ? 'rgba(37, 99, 235, 0.05)' : '#f8fafc',
+                    borderRadius: '10px',
+                    padding: '14px',
+                    textAlign: 'center',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s ease',
+                  }}
+                >
+                  <div style={{ fontSize: '20px', marginBottom: '3px' }}>🖼️</div>
+                  <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>
+                    Click to upload images, drag & drop, or paste (Ctrl+V)
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
+                    Supports all image formats • Max 7 images • Auto-compressed if &gt; 2MB
+                  </div>
+                </div>
+
+                {isCompressingImages && (
+                  <div style={{ fontSize: '12px', color: 'var(--accent-blue)', marginTop: '6px', fontWeight: '500' }}>
+                    ⏳ Optimizing and compressing images...
+                  </div>
+                )}
+
+                {/* Selected Image Previews */}
+                {ticketImages.length > 0 && (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
+                    {ticketImages.map((imgObj, idx) => (
+                      <div
+                        key={idx}
+                        style={{
+                          position: 'relative',
+                          width: '76px',
+                          height: '76px',
+                          borderRadius: '8px',
+                          overflow: 'hidden',
+                          border: '1px solid #e2e8f0',
+                          backgroundColor: '#f1f5f9'
+                        }}
+                      >
+                        <img
+                          src={imgObj.previewUrl}
+                          alt={`Attachment ${idx + 1}`}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                        />
+                        {imgObj.isCompressed && (
+                          <span
+                            style={{
+                              position: 'absolute',
+                              bottom: '2px',
+                              left: '2px',
+                              backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                              color: '#ffffff',
+                              fontSize: '9px',
+                              fontWeight: '700',
+                              padding: '1px 4px',
+                              borderRadius: '4px'
+                            }}
+                            title={`Compressed from ${formatFileSize(imgObj.originalSize)} to ${formatFileSize(imgObj.compressedSize)}`}
+                          >
+                            ~1MB
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleRemoveTicketImage(idx);
+                          }}
+                          style={{
+                            position: 'absolute',
+                            top: '2px',
+                            right: '2px',
+                            backgroundColor: 'rgba(15, 23, 42, 0.75)',
+                            color: '#ffffff',
+                            border: 'none',
+                            borderRadius: '50%',
+                            width: '20px',
+                            height: '20px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '11px',
+                            cursor: 'pointer',
+                            padding: 0
+                          }}
+                          title="Remove image"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
               <div style={styles.modalFooter}>
                 <button type="button" onClick={() => setShowAddTicket(false)} className="secondary">
                   Cancel
                 </button>
-                <button type="submit" disabled={loading}>
+                <button type="submit" disabled={loading || isCompressingImages}>
                   {loading ? 'Creating...' : 'Create Ticket'}
                 </button>
               </div>
@@ -2253,6 +2493,12 @@ Figma Reference Link:
           </div>
         </>
       )}
+
+      {/* Video prompt modal */}
+      <VideoPromptModal 
+        isOpen={showVideoPrompt} 
+        onClose={() => setShowVideoPrompt(false)} 
+      />
     </div>
   );
 }

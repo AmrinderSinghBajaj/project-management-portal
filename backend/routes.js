@@ -4,7 +4,54 @@ const mongoose = require('mongoose');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 const { User, Project, Ticket } = require('./models');
+
+const JWT_SECRET = process.env.JWT_SECRET || 'apptunix_pm_portal_super_secure_jwt_secret_2026_@key';
+
+// Generate cryptographically signed token
+const generateToken = (user) => {
+  return jwt.sign(
+    { id: user._id, email: user.email, role: user.role, name: user.name },
+    JWT_SECRET,
+    { expiresIn: '30d' }
+  );
+};
+
+// Sanitize user object for responses (omit password)
+const sanitizeUser = (user) => {
+  return {
+    _id: user._id,
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    createdAt: user.createdAt,
+    updatedAt: user.updatedAt
+  };
+};
+
+// Middleware: Authenticate Bearer JWT
+const authenticateToken = async (req, res, next) => {
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+
+  if (!token) {
+    return res.status(401).json({ error: 'Access denied. No authentication token provided.' });
+  }
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    const user = await User.findById(decoded.id);
+    if (!user) {
+      return res.status(401).json({ error: 'User no longer exists or session expired.' });
+    }
+    req.user = user;
+    next();
+  } catch (err) {
+    return res.status(401).json({ error: 'Invalid or expired session token. Please sign in again.' });
+  }
+};
 
 // Configure multer for file storage
 const storage = multer.diskStorage({
@@ -68,9 +115,13 @@ router.post('/users/signup', async (req, res) => {
     if (user) {
       return res.status(400).json({ error: 'User with this email already exists.' });
     }
-    user = new User({ name, email, role, password });
+    // Securely hash password with bcrypt
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user = new User({ name, email, role, password: hashedPassword });
     await user.save();
-    res.status(201).json(user);
+
+    const token = generateToken(user);
+    res.status(201).json({ token, user: sanitizeUser(user) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -88,21 +139,44 @@ router.post('/users/login', async (req, res) => {
       return res.status(404).json({ error: 'User not found. Please sign up.' });
     }
 
-    // Strict Password check
-    if (user.password && user.password !== password) {
+    // Secure password comparison (supports both bcrypt hashed & automatic legacy password upgrade)
+    let isMatch = false;
+    if (user.password && (user.password.startsWith('$2a$') || user.password.startsWith('$2b$'))) {
+      isMatch = await bcrypt.compare(password, user.password);
+    } else if (user.password) {
+      // Legacy plain-text check with auto-migration to bcrypt
+      isMatch = (user.password === password);
+      if (isMatch) {
+        user.password = await bcrypt.hash(password, 10);
+        await user.save();
+      }
+    }
+
+    if (!isMatch) {
       return res.status(401).json({ error: 'Invalid password. Please check and try again.' });
     }
 
-    res.json(user);
+    const token = generateToken(user);
+    res.json({ token, user: sanitizeUser(user) });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get all users (useful for PM assigning team members)
+// Verify Current User Session Token (Anti-tamper endpoint)
+router.get('/users/me', authenticateToken, async (req, res) => {
+  try {
+    const token = generateToken(req.user);
+    res.json({ token, user: sanitizeUser(req.user) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Get all users (useful for PM assigning team members - password excluded)
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({});
+    const users = await User.find({}, '-password');
     res.json(users);
   } catch (error) {
     res.status(500).json({ error: error.message });

@@ -10,9 +10,17 @@ import UserPerformanceModal from './components/UserPerformanceModal';
 import { API_BASE } from './config';
 
 export default function App() {
+  const [authToken, setAuthToken] = useState(() => localStorage.getItem('pm_token') || null);
   const [currentUser, setCurrentUser] = useState(() => {
     const saved = localStorage.getItem('pm_user');
-    return saved ? JSON.parse(saved) : null;
+    const token = localStorage.getItem('pm_token');
+    // Only trust cached user if a token exists
+    if (!token) return null;
+    try {
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
   });
 
   const [projects, setProjects] = useState([]);
@@ -23,24 +31,73 @@ export default function App() {
   const [projectToEdit, setProjectToEdit] = useState(null);
   const [inspectedUserForScorecard, setInspectedUserForScorecard] = useState(null);
   const [reloadTrigger, setReloadTrigger] = useState(0);
-
-  // Sync user state
-  const handleLoginSuccess = (user) => {
-    setCurrentUser(user);
-    localStorage.setItem('pm_user', JSON.stringify(user));
-  };
+  const [isVerifyingSession, setIsVerifyingSession] = useState(true);
 
   const handleLogout = () => {
     localStorage.removeItem('pm_user');
+    localStorage.removeItem('pm_token');
     setCurrentUser(null);
+    setAuthToken(null);
     setActiveProjectId(null);
     setActiveProjectData(null);
   };
 
+  // Sync user state on login/signup
+  const handleLoginSuccess = (data) => {
+    const user = data.user || data;
+    const token = data.token || null;
 
-  // Fetch all user's projects
+    if (token) {
+      localStorage.setItem('pm_token', token);
+      setAuthToken(token);
+    }
+    localStorage.setItem('pm_user', JSON.stringify(user));
+    setCurrentUser(user);
+    setIsVerifyingSession(false);
+  };
+
+  // Cryptographically verify session token with server on startup (Anti-tamper protection)
   useEffect(() => {
-    if (!currentUser) return;
+    const verifySession = async () => {
+      const storedToken = localStorage.getItem('pm_token');
+      if (!storedToken) {
+        handleLogout();
+        setIsVerifyingSession(false);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/users/me`, {
+          headers: {
+            'Authorization': `Bearer ${storedToken}`
+          }
+        });
+
+        if (!res.ok) {
+          // Token invalid, expired, or tampered with
+          handleLogout();
+        } else {
+          const data = await res.json();
+          setCurrentUser(data.user);
+          localStorage.setItem('pm_user', JSON.stringify(data.user));
+          if (data.token) {
+            localStorage.setItem('pm_token', data.token);
+            setAuthToken(data.token);
+          }
+        }
+      } catch (err) {
+        console.error('Session verification error:', err);
+      } finally {
+        setIsVerifyingSession(false);
+      }
+    };
+
+    verifySession();
+  }, []);
+
+  // Fetch all user's projects with auth header
+  useEffect(() => {
+    if (!currentUser || isVerifyingSession) return;
 
     const fetchProjects = async () => {
       try {
@@ -48,8 +105,15 @@ export default function App() {
           userId: currentUser._id,
           role: currentUser.role
         });
-        const res = await fetch(`${API_BASE}/projects?${queryParams}`);
-        if (!res.ok) throw new Error('Failed to fetch projects');
+        const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+        const res = await fetch(`${API_BASE}/projects?${queryParams}`, { headers });
+        if (!res.ok) {
+          if (res.status === 401) {
+            handleLogout();
+            return;
+          }
+          throw new Error('Failed to fetch projects');
+        }
         const data = await res.json();
         setProjects(data);
       } catch (err) {
@@ -58,19 +122,26 @@ export default function App() {
     };
 
     fetchProjects();
-  }, [currentUser, reloadTrigger]);
+  }, [currentUser, authToken, reloadTrigger, isVerifyingSession]);
 
   // Fetch full project data if active
   useEffect(() => {
-    if (!activeProjectId) {
+    if (!activeProjectId || !currentUser) {
       setActiveProjectData(null);
       return;
     }
 
     const fetchProjectDetails = async () => {
       try {
-        const res = await fetch(`${API_BASE}/projects/${activeProjectId}`);
-        if (!res.ok) throw new Error('Failed to load project details');
+        const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+        const res = await fetch(`${API_BASE}/projects/${activeProjectId}`, { headers });
+        if (!res.ok) {
+          if (res.status === 401) {
+            handleLogout();
+            return;
+          }
+          throw new Error('Failed to load project details');
+        }
         const data = await res.json();
         setActiveProjectData(data);
         setSelectedTicket(prev => {
@@ -84,7 +155,7 @@ export default function App() {
     };
 
     fetchProjectDetails();
-  }, [activeProjectId, reloadTrigger]);
+  }, [activeProjectId, authToken, reloadTrigger, currentUser]);
 
   const triggerRefresh = () => {
     setReloadTrigger(prev => prev + 1);
@@ -94,9 +165,13 @@ export default function App() {
     setProjects(reorderedProjects);
     try {
       const projectIds = reorderedProjects.map(p => p._id);
+      const headers = { 
+        'Content-Type': 'application/json',
+        ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {})
+      };
       const res = await fetch(`${API_BASE}/projects/reorder`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({ projectIds })
       });
       if (!res.ok) throw new Error('Failed to save project sequence');
@@ -107,9 +182,32 @@ export default function App() {
     }
   };
 
-  // Render Authentication screen if not logged in
-  if (!currentUser) {
+  // Render Authentication screen if verifying is done and not logged in
+  if (!isVerifyingSession && !currentUser) {
     return <AuthScreen onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // Brief smooth loading indicator during session token verification
+  if (isVerifyingSession && !currentUser) {
+    return (
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        height: '100vh',
+        width: '100vw',
+        backgroundColor: '#0f172a',
+        color: '#ffffff',
+        fontFamily: 'Inter, sans-serif'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '32px', marginBottom: '12px' }}>🔒</div>
+          <div style={{ fontSize: '14px', color: '#94a3b8', fontWeight: '500' }}>
+            Verifying secure session...
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (

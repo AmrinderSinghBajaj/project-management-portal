@@ -116,13 +116,18 @@ export default function App() {
         }
         const data = await res.json();
         setProjects(data);
+
+        // If user is a Client and has assigned project, auto-open their project board
+        if (currentUser.role === 'Client' && data.length > 0 && !activeProjectId) {
+          setActiveProjectId(data[0]._id);
+        }
       } catch (err) {
         console.error(err);
       }
     };
 
     fetchProjects();
-  }, [currentUser, authToken, reloadTrigger, isVerifyingSession]);
+  }, [currentUser, authToken, reloadTrigger, isVerifyingSession, activeProjectId]);
 
   // Fetch full project data if active
   useEffect(() => {
@@ -133,8 +138,12 @@ export default function App() {
 
     const fetchProjectDetails = async () => {
       try {
+        const queryParams = new URLSearchParams({
+          role: currentUser.role,
+          userId: currentUser._id
+        });
         const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
-        const res = await fetch(`${API_BASE}/projects/${activeProjectId}`, { headers });
+        const res = await fetch(`${API_BASE}/projects/${activeProjectId}?${queryParams}`, { headers });
         if (!res.ok) {
           if (res.status === 401) {
             handleLogout();
@@ -212,17 +221,19 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Left Sidebar Menu */}
-      <Sidebar
-        projects={projects}
-        activeProject={activeProjectData?.project}
-        onSelectProject={setActiveProjectId}
-        currentUser={currentUser}
-        onLogout={handleLogout}
-        onTriggerCreateProject={() => setShowCreateProject(true)}
-        onReorderProjects={handleReorderProjects}
-        onOpenScorecard={setInspectedUserForScorecard}
-      />
+      {/* Left Sidebar Menu (Hidden for Client for full-width board) */}
+      {currentUser?.role !== 'Client' && (
+        <Sidebar
+          projects={projects}
+          activeProject={activeProjectData?.project}
+          onSelectProject={setActiveProjectId}
+          currentUser={currentUser}
+          onLogout={handleLogout}
+          onTriggerCreateProject={() => setShowCreateProject(true)}
+          onReorderProjects={handleReorderProjects}
+          onOpenScorecard={setInspectedUserForScorecard}
+        />
+      )}
 
       {/* Main Board Area */}
       <div style={styles.workspace}>
@@ -234,6 +245,7 @@ export default function App() {
             onSelectTicket={setSelectedTicket}
             onEditProject={setProjectToEdit}
             onBackToDashboard={() => setActiveProjectId(null)}
+            onLogout={handleLogout}
           />
         ) : ['Delivery Head', 'CEO'].includes(currentUser.role) ? (
           <DeliveryHeadDashboard

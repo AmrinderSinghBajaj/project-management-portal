@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE, SERVER_BASE } from '../config';
+import RichTextEditorInput, { RichTextRenderer } from './RichTextEditor';
 import { 
   isVideoFile, 
   isImageFile, 
@@ -123,6 +124,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
   const [isEditing, setIsEditing] = useState(false);
   const [editTask, setEditTask] = useState(ticket.task || '');
   const [editDesc, setEditDesc] = useState(ticket.description || '');
+  const editDescRef = useRef(null);
   const [editType, setEditType] = useState(ticket.ticketType || 'Task');
   const [editPriority, setEditPriority] = useState(ticket.priority || 'Medium');
   const [editFigma, setEditFigma] = useState(ticket.figmaRef || '');
@@ -601,11 +603,28 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
         {/* Header */}
         <div style={styles.header}>
           <div style={styles.headerTitleGroup}>
-            <span style={styles.ticketIdLabel}>ID: #{localTicket._id ? localTicket._id.slice(-6).toUpperCase() : ''}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style={styles.ticketIdLabel}>ID: #{localTicket._id ? localTicket._id.slice(-6).toUpperCase() : ''}</span>
+              {Boolean(localTicket.isClientTicket || localTicket.reportedByRole === 'Client') && (
+                <span style={{
+                  fontSize: '11px',
+                  fontWeight: '700',
+                  color: '#2563eb',
+                  backgroundColor: '#eff6ff',
+                  border: '1px solid #bfdbfe',
+                  borderRadius: '6px',
+                  padding: '2px 8px',
+                  letterSpacing: '0.4px',
+                  textTransform: 'uppercase'
+                }}>
+                  👤 Client {localTicket.reportedBy ? `• ${localTicket.reportedBy}` : ''}
+                </span>
+              )}
+            </div>
             <h3 style={styles.title}>{localTicket.task}</h3>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'QA', 'Quality Analyst (QA)', 'CEO', 'Delivery Head'].includes(currentUser.role) && !isEditing && (
+            {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'QA', 'Quality Analyst (QA)', 'CEO', 'Delivery Head', 'Client'].includes(currentUser.role) && !isEditing && (
               <button 
                 type="button"
                 onClick={() => {
@@ -756,39 +775,12 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                       boxShadow: isEditDragOver ? '0 0 0 3px rgba(37, 99, 235, 0.12)' : 'none'
                     }}
                   >
-                    <textarea
+                    <RichTextEditorInput
                       value={editDesc}
-                      onChange={(e) => setEditDesc(e.target.value)}
-                      onPaste={(e) => {
-                        if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
-                          const files = Array.from(e.clipboardData.files);
-                          if (files.some(f => isVideoFile(f))) {
-                            setShowVideoPrompt(true);
-                          }
-                          const imageFiles = files.filter(f => isImageFile(f));
-                          if (imageFiles.length > 0) {
-                            e.preventDefault();
-                            handleProcessIncomingEditImages(imageFiles);
-                          }
-                        }
-                      }}
+                      onChange={setEditDesc}
+                      onPasteFiles={handleProcessIncomingEditImages}
+                      minHeight="130px"
                       placeholder="Provide ticket details, paste photos/videos directly, or paste Figma/Loom links..."
-                      style={{
-                        width: '100%',
-                        minHeight: '130px',
-                        padding: '10px 12px',
-                        lineHeight: '1.5',
-                        fontSize: '13px',
-                        border: 'none',
-                        outline: 'none',
-                        backgroundColor: 'transparent',
-                        resize: 'vertical',
-                        fontFamily: 'inherit',
-                        color: 'var(--text-primary)',
-                        boxSizing: 'border-box'
-                      }}
-                      rows={4}
-                      required
                     />
 
                     {/* Staged Edit Images inside Description Box */}
@@ -937,7 +929,9 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
               <>
                 <div style={styles.section}>
                   <h4 style={styles.sectionTitle}>Description</h4>
-                  <p style={styles.description}>{renderTextWithLinks(localTicket.description)}</p>
+                  <div style={styles.description}>
+                    <RichTextRenderer text={localTicket.description} />
+                  </div>
                 </div>
 
                 {localTicket.figmaRef && (
@@ -1797,13 +1791,13 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '920px',
-    padding: '30px',
-    boxShadow: '0 20px 40px rgba(15, 23, 42, 0.12)',
-    maxHeight: '90vh',
+    maxWidth: '1150px',
+    padding: '24px 30px',
+    boxShadow: '0 20px 45px rgba(15, 23, 42, 0.18)',
+    maxHeight: '92vh',
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
+    gap: '16px',
     backgroundColor: '#ffffff',
     borderRadius: '16px',
     color: 'var(--text-primary)',
@@ -1813,7 +1807,7 @@ const styles = {
     justifyContent: 'space-between',
     alignItems: 'flex-start',
     borderBottom: '1px solid var(--panel-border)',
-    paddingBottom: '16px',
+    paddingBottom: '14px',
     gap: '16px',
     minWidth: 0,
   },
@@ -1862,7 +1856,7 @@ const styles = {
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) 220px',
+    gridTemplateColumns: 'minmax(0, 1fr) 280px',
     gap: '24px',
     overflow: 'hidden',
     height: '100%',
@@ -1871,22 +1865,22 @@ const styles = {
   leftCol: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '24px',
+    gap: '20px',
     overflowY: 'auto',
     overflowX: 'hidden',
     paddingRight: '12px',
-    maxHeight: '70vh',
+    maxHeight: '74vh',
     minWidth: 0,
     width: '100%',
   },
   rightCol: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '20px',
+    gap: '16px',
     borderLeft: '1px solid var(--panel-border)',
-    paddingLeft: '16px',
+    paddingLeft: '18px',
     overflowY: 'auto',
-    maxHeight: '70vh',
+    maxHeight: '74vh',
   },
   discussionSection: {
     borderTop: '1px solid var(--panel-border)',

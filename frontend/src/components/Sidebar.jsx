@@ -53,82 +53,120 @@ export default function Sidebar({
       </div>
 
       {/* Projects Navigation */}
-      <div style={styles.navSection}>
-        {/* All Projects Overview Link */}
-        <div
-          onClick={() => onSelectProject(null)}
-          style={{
-            ...styles.allProjectsBtn,
-            ...(!activeProject ? styles.allProjectsBtnActive : {})
-          }}
-          className={`sidebar-all-projects-item ${!activeProject ? 'active' : ''}`}
-          title="Executive Projects Dashboard"
-        >
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={styles.allProjectsTitle}>All Projects</div>
-            <div style={styles.allProjectsSub}>
-              {projects.length} {projects.length === 1 ? 'project' : 'projects'} total
+      {currentUser?.role === 'Client' ? (
+        <div style={styles.navSection}>
+          <div style={{
+            padding: '12px 14px',
+            background: 'rgba(30, 58, 138, 0.05)',
+            borderRadius: '10px',
+            border: '1px solid rgba(30, 58, 138, 0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px'
+          }}>
+            <div style={{
+              width: '32px',
+              height: '32px',
+              borderRadius: '8px',
+              backgroundColor: 'var(--accent-blue)',
+              color: '#ffffff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              fontWeight: '700',
+              fontSize: '14px',
+              flexShrink: 0
+            }}>
+              {activeProject?.name ? activeProject.name.charAt(0).toUpperCase() : 'P'}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: '13px', fontWeight: '700', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                {activeProject?.name || 'My Project'}
+              </div>
+              <div style={{ fontSize: '11px', color: '#64748b' }}>
+                Client Portal
+              </div>
             </div>
           </div>
-          {!activeProject && <div style={styles.activeDot} />}
         </div>
+      ) : (
+        <div style={styles.navSection}>
+          {/* All Projects Overview Link */}
+          <div
+            onClick={() => onSelectProject(null)}
+            style={{
+              ...styles.allProjectsBtn,
+              ...(!activeProject ? styles.allProjectsBtnActive : {})
+            }}
+            className={`sidebar-all-projects-item ${!activeProject ? 'active' : ''}`}
+            title="Executive Projects Dashboard"
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={styles.allProjectsTitle}>All Projects</div>
+              <div style={styles.allProjectsSub}>
+                {projects.length} {projects.length === 1 ? 'project' : 'projects'} total
+              </div>
+            </div>
+            {!activeProject && <div style={styles.activeDot} />}
+          </div>
 
-        <div style={styles.navHeader}>
-          <span>PROJECTS</span>
-          {(isPriorityManager || ['Delivery Head', 'CEO'].includes(currentUser?.role)) && (
-            <button 
-              className="sidebar-add-btn"
-              onClick={onTriggerCreateProject}
-              style={styles.addButton}
-              title="Create New Project"
-            >
-              +
-            </button>
-          )}
-        </div>
-        
-        <div style={styles.projectList}>
-          {projects.length === 0 ? (
-            <div style={styles.emptyState}>No projects assigned</div>
-          ) : (
-            projects.map((proj, idx) => {
-              const isActive = activeProject?._id === proj._id;
-              return (
-                <div
-                  key={proj._id}
-                  onClick={() => onSelectProject(proj._id)}
-                  draggable={isPriorityManager}
-                  onDragStart={(e) => handleDragStart(e, idx)}
-                  onDragOver={handleDragOver}
-                  onDrop={(e) => handleDrop(e, idx)}
-                  style={{
-                    ...styles.projectItem,
-                    ...(isActive ? styles.projectItemActive : {}),
-                  }}
-                  className={`sidebar-project-item ${isActive ? 'active' : ''}`}
-                >
-                  <div style={styles.projectInfo}>
-                    <div style={styles.projectName}>{proj.name}</div>
-                    <div style={styles.projectDetails}>
-                      {isDeveloperRole(currentUser?.role)
-                        ? `${proj.developerPendingCount || 0} pending tickets`
-                        : `${proj.readyForTestingCount || 0} pending tickets`}
+          <div style={styles.navHeader}>
+            <span>PROJECTS</span>
+            {(isPriorityManager || ['Delivery Head', 'CEO'].includes(currentUser?.role)) && (
+              <button 
+                className="sidebar-add-btn"
+                onClick={onTriggerCreateProject}
+                style={styles.addButton}
+                title="Create New Project"
+              >
+                +
+              </button>
+            )}
+          </div>
+          
+          <div style={styles.projectList}>
+            {projects.length === 0 ? (
+              <div style={styles.emptyState}>No projects assigned</div>
+            ) : (
+              projects.map((proj, idx) => {
+                const isActive = activeProject?._id === proj._id;
+                return (
+                  <div
+                    key={proj._id}
+                    onClick={() => onSelectProject(proj._id)}
+                    draggable={isPriorityManager}
+                    onDragStart={(e) => handleDragStart(e, idx)}
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, idx)}
+                    style={{
+                      ...styles.projectItem,
+                      ...(isActive ? styles.projectItemActive : {}),
+                    }}
+                    className={`sidebar-project-item ${isActive ? 'active' : ''}`}
+                  >
+                    <div style={styles.projectInfo}>
+                      <div style={styles.projectName}>{proj.name}</div>
+                      <div style={styles.projectDetails}>
+                        {isDeveloperRole(currentUser?.role)
+                          ? `${proj.developerPendingCount || 0} pending tickets`
+                          : `${proj.readyForTestingCount || 0} pending tickets`}
+                      </div>
+                    </div>
+
+                    {/* Visual Priority Badge (P1, P2...) with Tooltip */}
+                    <div 
+                      style={styles.priorityBadge}
+                      title={isPriorityManager ? "Drag to reorder project priority across company" : "Executive priority ranking"}
+                    >
+                      P{idx + 1}
                     </div>
                   </div>
-
-                  {/* Visual Priority Badge (P1, P2...) with Tooltip */}
-                  <div 
-                    style={styles.priorityBadge}
-                    title={isPriorityManager ? "Drag to reorder project priority across company" : "Executive priority ranking"}
-                  >
-                    P{idx + 1}
-                  </div>
-                </div>
-              );
-            })
-          )}
+                );
+              })
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
 
       {/* User Footer Profile */}

@@ -106,25 +106,24 @@ export default function PMProjectsDashboard({
       <div style={styles.topHeader}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
           <h1 style={styles.pageTitle}>Projects</h1>
-          <span style={styles.countBadge}>{projects.length}</span>
         </div>
 
         {/* Minimal Financial Summary Strip */}
         <div style={styles.metricStrip}>
           <div style={styles.metricItem}>
             <span style={styles.metricLabel}>TOTAL REVENUE</span>
-            <span style={styles.metricVal}>${totalRevenueSum.toLocaleString()}</span>
+            <span style={styles.metricVal}>{totalRevenueSum.toLocaleString()}</span>
           </div>
           <div style={styles.metricDivider} />
           <div style={styles.metricItem}>
             <span style={styles.metricLabel}>RECEIVED</span>
-            <span style={{ ...styles.metricVal, color: '#059669' }}>${totalReceivedSum.toLocaleString()}</span>
+            <span style={{ ...styles.metricVal, color: '#059669' }}>{totalReceivedSum.toLocaleString()}</span>
           </div>
           <div style={styles.metricDivider} />
           <div style={styles.metricItem}>
             <span style={styles.metricLabel}>PENDING</span>
             <span style={{ ...styles.metricVal, color: totalPendingSum > 0 ? '#dc2626' : '#64748b' }}>
-              ${totalPendingSum.toLocaleString()}
+              {totalPendingSum.toLocaleString()}
             </span>
           </div>
           {['PM', 'Project Manager (PM)', 'CEO'].includes(currentUser?.role) && (
@@ -141,13 +140,12 @@ export default function PMProjectsDashboard({
       {/* Clean Controls: Search + Filter Tabs */}
       <div style={styles.filterBar}>
         <div style={styles.searchBox}>
-          <span style={{ fontSize: '13px', opacity: 0.5 }}>🔍</span>
           <input
             type="text"
             placeholder="Search projects..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            style={styles.searchInput}
+            style={{ ...styles.searchInput, paddingLeft: '12px' }}
           />
           {searchQuery && (
             <button onClick={() => setSearchQuery('')} style={styles.clearSearchBtn}>×</button>
@@ -288,16 +286,16 @@ export default function PMProjectsDashboard({
                     >
                       <div style={styles.paymentNumbers}>
                         <span style={{ color: '#059669', fontWeight: '700' }}>
-                          ${(project.paymentReceived || 0).toLocaleString()}
+                          {(project.paymentReceived || 0).toLocaleString()}
                         </span>
                         <span style={{ color: '#94a3b8', margin: '0 3px' }}>/</span>
                         <span style={{ color: '#1e293b', fontWeight: '600' }}>
-                          ${(project.totalRevenue || 0).toLocaleString()}
+                          {(project.totalRevenue || 0).toLocaleString()}
                         </span>
                       </div>
                       {(project.pendingPayment || 0) > 0 && (
                         <div style={styles.pendingDueText}>
-                          Due: ${(project.pendingPayment || 0).toLocaleString()}
+                          Due: {(project.pendingPayment || 0).toLocaleString()}
                         </div>
                       )}
                     </div>
@@ -322,7 +320,7 @@ export default function PMProjectsDashboard({
 
                           <form onSubmit={(e) => handleSaveFinancials(e, project._id)} style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                             <div>
-                              <label style={styles.inputLabel}>Total Revenue ($)</label>
+                              <label style={styles.inputLabel}>Total Revenue</label>
                               <input
                                 type="number"
                                 value={editRevenue}
@@ -335,7 +333,7 @@ export default function PMProjectsDashboard({
                             </div>
 
                             <div>
-                              <label style={styles.inputLabel}>Payment Received ($)</label>
+                              <label style={styles.inputLabel}>Payment Received</label>
                               <input
                                 type="number"
                                 value={editReceived}
@@ -348,7 +346,7 @@ export default function PMProjectsDashboard({
 
                             <div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
-                                <label style={styles.inputLabel}>Pending Payment ($)</label>
+                                <label style={styles.inputLabel}>Pending Payment</label>
                                 <button
                                   type="button"
                                   onClick={(e) => {

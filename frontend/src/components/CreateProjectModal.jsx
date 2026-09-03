@@ -13,7 +13,7 @@ function CustomDatePicker({ value, onChange }) {
   };
 
   const formatUserDisplay = (dateStr) => {
-    if (!dateStr) return 'Select Delivery Date (Optional)';
+    if (!dateStr) return 'Select Delivery Date';
     const [y, m, d] = dateStr.split('-');
     const date = new Date(y, m - 1, d);
     return date.toLocaleDateString('en-US', { 
@@ -357,6 +357,10 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
   const [totalRevenue, setTotalRevenue] = useState('');
   const [paymentReceived, setPaymentReceived] = useState('');
   const [pendingPayment, setPendingPayment] = useState('');
+  const [clientName, setClientName] = useState('');
+  const [clientEmail, setClientEmail] = useState('');
+  const [clientPassword, setClientPassword] = useState('');
+  const [showClientPassword, setShowClientPassword] = useState(false);
   const [users, setUsers] = useState([]);
   const [assignments, setAssignments] = useState(createEmptyAssignments);
   const [loading, setLoading] = useState(false);
@@ -386,6 +390,15 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
       setPaymentReceived(projectToEdit.paymentReceived !== undefined ? projectToEdit.paymentReceived : '');
       setPendingPayment(projectToEdit.pendingPayment !== undefined ? projectToEdit.pendingPayment : '');
       
+      if (projectToEdit.clientUsers && projectToEdit.clientUsers.length > 0) {
+        const cUser = projectToEdit.clientUsers[0];
+        const cUserObj = typeof cUser === 'object' ? cUser : users.find(u => u._id === cUser);
+        if (cUserObj) {
+          setClientName(cUserObj.name || '');
+          setClientEmail(cUserObj.email || '');
+        }
+      }
+
       if (projectToEdit.deliveryDate) {
         const d = new Date(projectToEdit.deliveryDate);
         const yyyy = d.getFullYear();
@@ -445,7 +458,10 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
           totalRevenue: Number(totalRevenue) || 0,
           paymentReceived: Number(paymentReceived) || 0,
           pendingPayment: Number(pendingPayment) || 0,
-          teamMembers
+          teamMembers,
+          clientName: clientName.trim(),
+          clientEmail: clientEmail.trim(),
+          clientPassword: clientPassword.trim()
         })
       });
       const data = await res.json();
@@ -513,11 +529,6 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
         <div style={styles.header}>
           <div>
             <h3 style={styles.title}>{projectToEdit ? 'Edit Project Details' : 'Create New Project'}</h3>
-            <p style={styles.subtitle}>
-              {projectToEdit 
-                ? 'Update timeline, financials, or assign/remove team members across departments.' 
-                : 'Configure project info, milestones, and allocate multi-disciplinary team members.'}
-            </p>
           </div>
           <button onClick={onClose} style={styles.closeBtn} title="Close">×</button>
         </div>
@@ -529,7 +540,6 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
             <label style={styles.inputLabel}>Project Name</label>
             <input
               type="text"
-              placeholder="e.g. E-Commerce Mobile App"
               value={name}
               onChange={(e) => setName(e.target.value)}
               required
@@ -539,7 +549,6 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
           <div style={styles.inputGroup}>
             <label style={styles.inputLabel}>Description</label>
             <textarea
-              placeholder="Provide a brief project description..."
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               rows={3}
@@ -547,9 +556,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
           </div>
 
           <div style={styles.inputGroup}>
-            <label style={styles.inputLabel}>
-              Delivery Date <span style={{ color: 'var(--text-secondary)', fontWeight: '400', fontSize: '0.85em' }}>(Optional)</span>
-            </label>
+            <label style={styles.inputLabel}>Delivery Date</label>
             <CustomDatePicker
               value={deliveryDate}
               onChange={setDeliveryDate}
@@ -558,34 +565,105 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
             <div style={styles.inputGroup}>
-              <label style={styles.inputLabel}>Total Revenue ($)</label>
+              <label style={styles.inputLabel}>Total Revenue</label>
               <input
                 type="number"
-                placeholder="e.g. 50000"
                 value={totalRevenue}
                 onChange={(e) => setTotalRevenue(e.target.value)}
                 min="0"
               />
             </div>
             <div style={styles.inputGroup}>
-              <label style={styles.inputLabel}>Received ($)</label>
+              <label style={styles.inputLabel}>Received</label>
               <input
                 type="number"
-                placeholder="e.g. 35000"
                 value={paymentReceived}
                 onChange={(e) => setPaymentReceived(e.target.value)}
                 min="0"
               />
             </div>
             <div style={styles.inputGroup}>
-              <label style={styles.inputLabel}>Pending ($)</label>
+              <label style={styles.inputLabel}>Pending</label>
               <input
                 type="number"
-                placeholder="e.g. 15000"
                 value={pendingPayment}
                 onChange={(e) => setPendingPayment(e.target.value)}
                 min="0"
               />
+            </div>
+          </div>
+
+          {/* Client Portal Access Credentials Card */}
+          <div style={{
+            backgroundColor: '#f8fafc',
+            border: '1px solid #e2e8f0',
+            borderRadius: '12px',
+            padding: '14px 16px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '10px'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <label style={{ ...styles.teamSectionLabel, margin: 0, color: 'var(--accent-blue)' }}>
+                CLIENT PORTAL ACCESS
+              </label>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1.3fr 1.1fr', gap: '10px' }}>
+              <div style={styles.inputGroup}>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '4px' }}>
+                  Client Name
+                </label>
+                <input
+                  type="text"
+                  value={clientName}
+                  onChange={(e) => setClientName(e.target.value)}
+                  style={{ fontSize: '12.5px', padding: '7px 10px' }}
+                />
+              </div>
+
+              <div style={styles.inputGroup}>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '4px' }}>
+                  Client Work Email
+                </label>
+                <input
+                  type="email"
+                  value={clientEmail}
+                  onChange={(e) => setClientEmail(e.target.value)}
+                  style={{ fontSize: '12.5px', padding: '7px 10px' }}
+                />
+              </div>
+
+              <div style={styles.inputGroup}>
+                <label style={{ fontSize: '12px', fontWeight: '600', color: '#334155', marginBottom: '4px' }}>
+                  Password
+                </label>
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <input
+                    type={showClientPassword ? 'text' : 'password'}
+                    value={clientPassword}
+                    onChange={(e) => setClientPassword(e.target.value)}
+                    style={{ fontSize: '12.5px', padding: '7px 30px 7px 10px', width: '100%' }}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowClientPassword(!showClientPassword)}
+                    style={{
+                      position: 'absolute',
+                      right: '6px',
+                      background: 'none',
+                      border: 'none',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                      padding: 0,
+                      opacity: 0.7
+                    }}
+                    title={showClientPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showClientPassword ? '🙈' : '👁️'}
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 

@@ -14,7 +14,7 @@ const UserSchema = new mongoose.Schema({
       'Designer', 'Sales', 'Sales Rep', 'Android Developer', 'iOS Developer', 
       'Flutter Developer', 'Python Developer', 'Full Stack Developer', 
       'Angular Developer', 'Frontend Designer', 'Backend Developer', 'Delivery Head',
-      'Product Owner'
+      'Product Owner', 'Client'
     ]
   }
 }, { timestamps: true });
@@ -34,6 +34,7 @@ const ProjectSchema = new mongoose.Schema({
   pendingPayment: { type: Number, default: 0 },
   sequence: { type: Number, default: 0 },
   teamMembers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+  clientUsers: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   documents: [{
     name: { type: String, required: true },
     path: { type: String, required: true },
@@ -97,6 +98,10 @@ const TicketSchema = new mongoose.Schema({
     type: String, 
     default: 'To be started'
   },
+  isClientTicket: { type: Boolean, default: false },
+  reportedBy: { type: String },
+  reportedByEmail: { type: String },
+  reportedByRole: { type: String },
   comments: [{
     user: { type: String, required: true },
     comment: { type: String, default: '' },

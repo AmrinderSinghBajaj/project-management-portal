@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { API_BASE, SERVER_BASE } from '../config';
+import RichTextEditorInput, { getWordCountFromHtml } from './RichTextEditor';
 import { 
   isVideoFile, 
   isImageFile, 
@@ -76,7 +77,8 @@ export default function ProjectBoard({
   onRefresh, 
   onSelectTicket,
   onEditProject,
-  onBackToDashboard
+  onBackToDashboard,
+  onLogout
 }) {
   const { project, tickets = [] } = projectData;
   const [activeTab, setActiveTab] = useState('board'); // board, docs, cr
@@ -90,6 +92,7 @@ export default function ProjectBoard({
   const [ticketType, setTicketType] = useState('Task'); // Feature, Task, Bug
   const [ticketPriority, setTicketPriority] = useState('Medium'); // High, Medium, Low
   const [ticketDesc, setTicketDesc] = useState('');
+  const ticketDescRef = useRef(null);
   const [ticketFigma, setTicketFigma] = useState('');
   const [ticketDeadline, setTicketDeadline] = useState('');
   const [ticketTags, setTicketTags] = useState([]);
@@ -207,11 +210,13 @@ export default function ProjectBoard({
   const [appliedFilterTypes, setAppliedFilterTypes] = useState([]); // [] means all, or ['Feature', 'Bug']
   const [appliedFilterPriorities, setAppliedFilterPriorities] = useState([]); // [] means all, or ['High', 'Medium']
   const [appliedFilterTechs, setAppliedFilterTechs] = useState([]); // [] means all, or ['android', 'ios']
+  const [appliedFilterSource, setAppliedFilterSource] = useState('all'); // 'all', 'client', 'internal'
 
   // Staged / Temporary filters inside the open dropdown
   const [tempFilterTypes, setTempFilterTypes] = useState([]);
   const [tempFilterPriorities, setTempFilterPriorities] = useState([]);
   const [tempFilterTechs, setTempFilterTechs] = useState([]);
+  const [tempFilterSource, setTempFilterSource] = useState('all');
 
   const [isFilterMenuOpen, setIsFilterMenuOpen] = useState(false);
 
@@ -220,6 +225,7 @@ export default function ProjectBoard({
     setTempFilterTypes([...appliedFilterTypes]);
     setTempFilterPriorities([...appliedFilterPriorities]);
     setTempFilterTechs([...appliedFilterTechs]);
+    setTempFilterSource(appliedFilterSource);
     setIsFilterMenuOpen(true);
   };
 
@@ -262,6 +268,7 @@ export default function ProjectBoard({
     setAppliedFilterTypes(tempFilterTypes);
     setAppliedFilterPriorities(tempFilterPriorities);
     setAppliedFilterTechs(tempFilterTechs);
+    setAppliedFilterSource(tempFilterSource);
     setIsFilterMenuOpen(false);
   };
 
@@ -269,15 +276,18 @@ export default function ProjectBoard({
     setTempFilterTypes([]);
     setTempFilterPriorities([]);
     setTempFilterTechs([]);
+    setTempFilterSource('all');
     setAppliedFilterTypes([]);
     setAppliedFilterPriorities([]);
     setAppliedFilterTechs([]);
+    setAppliedFilterSource('all');
     setIsFilterMenuOpen(false);
   };
 
   const activeFilterCount = appliedFilterTypes.length + 
                             appliedFilterPriorities.length + 
-                            appliedFilterTechs.length;
+                            appliedFilterTechs.length + 
+                            (appliedFilterSource !== 'all' ? 1 : 0);
 
   const filteredSearchTickets = tickets.filter(t => {
     const query = searchQuery.trim().toLowerCase();
@@ -438,8 +448,8 @@ Figma Reference Link:
     e.preventDefault();
     setError('');
 
-    if (getWordCount(ticketDesc) > 200) {
-      setError('Description must be 200 words or less.');
+    if (getWordCountFromHtml(ticketDesc) > 400) {
+      setError('Description must be 400 words or less.');
       return;
     }
 
@@ -450,6 +460,8 @@ Figma Reference Link:
         const rawFiles = ticketImages.map(img => img.file);
         uploadedImagePaths = await uploadImagesToServer(rawFiles);
       }
+
+      const isClientUser = currentUser?.role === 'Client';
 
       const res = await fetch(`${API_BASE}/projects/${project._id}/tickets`, {
         method: 'POST',
@@ -464,7 +476,11 @@ Figma Reference Link:
           tags: ticketTags,
           images: uploadedImagePaths,
           createdBy: currentUser.name,
-          status: ticketStatus
+          status: ticketStatus,
+          isClientTicket: isClientUser,
+          reportedBy: isClientUser ? currentUser.name : null,
+          reportedByEmail: isClientUser ? currentUser.email : null,
+          reportedByRole: isClientUser ? 'Client' : null
         })
       });
       if (!res.ok) throw new Error('Failed to create ticket');
@@ -854,8 +870,22 @@ Figma Reference Link:
     <div style={styles.boardContainer} className="fade-in">
       <div style={styles.boardHeader}>
         <div style={styles.headerLeft}>
+          {currentUser?.role === 'Client' && (
+            <div style={{ display: 'flex', alignItems: 'center', marginRight: '6px' }}>
+              <img 
+                src="/logo_icon.png" 
+                alt="Apptunix" 
+                style={{ 
+                  height: '36px', 
+                  width: '36px', 
+                  objectFit: 'contain',
+                  clipPath: 'inset(0% 0% 5% 5%)'
+                }} 
+              />
+            </div>
+          )}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={styles.projectBadge}>ACTIVE PROJECT</div>
+            {currentUser?.role !== 'Client' && <div style={styles.projectBadge}>ACTIVE PROJECT</div>}
             {onBackToDashboard && ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO', 'Delivery Head'].includes(currentUser?.role) && (
               <button
                 type="button"
@@ -870,7 +900,7 @@ Figma Reference Link:
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <h1 style={styles.projectTitle}>{project.name}</h1>
           </div>
-          <p style={styles.projectDesc}>{project.description}</p>
+          <p style={styles.projectDesc}>{project.description || (currentUser?.role === 'Client' ? 'Client Issue Portal' : '')}</p>
         </div>
 
         {/* Global Search Bar */}
@@ -1149,10 +1179,74 @@ Figma Reference Link:
               )}
             </div>
           )}
-          <div style={styles.headerRight}>
-            <div style={styles.dateLabel}>DELIVERY DEADLINE</div>
-            <div style={styles.dateValue}>{formatDate(project.deliveryDate)}</div>
-          </div>
+          {currentUser?.role !== 'Client' ? (
+            <div style={styles.headerRight}>
+              <div style={styles.dateLabel}>DELIVERY DEADLINE</div>
+              <div style={styles.dateValue}>{formatDate(project.deliveryDate)}</div>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <div style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '4px 10px',
+                background: '#f8fafc',
+                borderRadius: '8px',
+                border: '1px solid #e2e8f0'
+              }}>
+                <div style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--accent-blue)',
+                  color: '#ffffff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontWeight: '700',
+                  fontSize: '12px',
+                  flexShrink: 0
+                }}>
+                  {currentUser?.name?.charAt(0).toUpperCase() || 'C'}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                  <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>
+                    {currentUser?.name || 'Client'}
+                  </span>
+                  <span style={{ fontSize: '10px', color: '#64748b' }}>
+                    Client
+                  </span>
+                </div>
+              </div>
+
+              {onLogout && (
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '5px',
+                    padding: '7px 11px',
+                    borderRadius: '8px',
+                    backgroundColor: '#ffffff',
+                    border: '1px solid #e2e8f0',
+                    color: '#dc2626',
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    cursor: 'pointer',
+                    boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                    transition: 'var(--transition-smooth)'
+                  }}
+                  title="Sign Out"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+                  <span>Sign Out</span>
+                </button>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -1166,20 +1260,24 @@ Figma Reference Link:
           >
             Tasks Board
           </div>
-          <div 
-            onClick={() => setActiveTab('docs')}
-            className="tab-item"
-            style={{ ...styles.tab, ...(activeTab === 'docs' ? styles.tabActive : {}) }}
-          >
-            Important Docs/URL ({(project.documents?.length || 0) + (project.importantLinks?.length || 0)})
-          </div>
-          <div 
-            onClick={() => setActiveTab('cr')}
-            className="tab-item"
-            style={{ ...styles.tab, ...(activeTab === 'cr' ? styles.tabActive : {}) }}
-          >
-            Change Requests ({project.changeRequests?.length || 0})
-          </div>
+          {currentUser?.role !== 'Client' && (
+            <>
+              <div 
+                onClick={() => setActiveTab('docs')}
+                className="tab-item"
+                style={{ ...styles.tab, ...(activeTab === 'docs' ? styles.tabActive : {}) }}
+              >
+                Important Docs/URL ({(project.documents?.length || 0) + (project.importantLinks?.length || 0)})
+              </div>
+              <div 
+                onClick={() => setActiveTab('cr')}
+                className="tab-item"
+                style={{ ...styles.tab, ...(activeTab === 'cr' ? styles.tabActive : {}) }}
+              >
+                Change Requests ({project.changeRequests?.length || 0})
+              </div>
+            </>
+          )}
         </div>
 
         {/* Right Actions: Filter & Add CR */}
@@ -1352,6 +1450,43 @@ Figma Reference Link:
                       </div>
                     </div>
 
+                    {/* Filter 4: Ticket Origin / Source (Only for internal team) */}
+                    {currentUser?.role !== 'Client' && (
+                      <div style={styles.filterGroup}>
+                        <label style={styles.filterGroupLabel}>SOURCE / ORIGIN</label>
+                        <div style={styles.filterOptionsGrid}>
+                          {[
+                            { value: 'all', label: 'All Sources' },
+                            { value: 'client', label: '👤 Client Issues' },
+                            { value: 'internal', label: '🛠️ Internal / QA' }
+                          ].map(opt => {
+                            const isSelected = tempFilterSource === opt.value;
+                            return (
+                              <div
+                                key={opt.value}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setTempFilterSource(opt.value);
+                                }}
+                                style={{
+                                  ...styles.filterOptionPill,
+                                  backgroundColor: isSelected ? '#1e3a8a' : '#f8fafc',
+                                  color: isSelected ? '#ffffff' : '#1e293b',
+                                  borderColor: isSelected ? '#1e3a8a' : '#cbd5e1',
+                                  fontWeight: isSelected ? '700' : '600',
+                                  boxShadow: isSelected ? '0 2px 8px rgba(30, 58, 138, 0.25)' : '0 1px 2px rgba(0,0,0,0.03)',
+                                  cursor: 'pointer',
+                                }}
+                                className="filter-pill-item"
+                              >
+                                {opt.label} {isSelected && '✓'}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Filter Footer with Action Buttons */}
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', paddingTop: '10px', borderTop: '1px solid rgba(15, 23, 42, 0.08)' }}>
                       <button
@@ -1410,7 +1545,7 @@ Figma Reference Link:
                             boxShadow: '0 2px 6px rgba(30, 58, 138, 0.3)'
                           }}
                         >
-                          Apply Filters { (tempFilterTypes.length + tempFilterPriorities.length + tempFilterTechs.length) > 0 ? `(${tempFilterTypes.length + tempFilterPriorities.length + tempFilterTechs.length})` : '' }
+                          Apply Filters { (tempFilterTypes.length + tempFilterPriorities.length + tempFilterTechs.length + (tempFilterSource !== 'all' ? 1 : 0)) > 0 ? `(${tempFilterTypes.length + tempFilterPriorities.length + tempFilterTechs.length + (tempFilterSource !== 'all' ? 1 : 0)})` : '' }
                         </button>
                       </div>
                     </div>
@@ -1448,6 +1583,8 @@ Figma Reference Link:
                     const hasMatch = appliedFilterTechs.some(tech => ticketTags.includes(tech));
                     if (!hasMatch) return false;
                   }
+                  if (appliedFilterSource === 'client' && !t.isClientTicket && t.reportedByRole !== 'Client') return false;
+                  if (appliedFilterSource === 'internal' && (t.isClientTicket || t.reportedByRole === 'Client')) return false;
                   return true;
                 })
                 .sort((a, b) => {
@@ -1466,7 +1603,8 @@ Figma Reference Link:
                   <div style={styles.columnHeader}>
                     <span style={styles.columnTitle}>{col.title}</span>
                     <div style={styles.columnMeta}>
-                      {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'QA', 'Quality Analyst (QA)'].includes(currentUser.role) && (
+                      {((['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'QA', 'Quality Analyst (QA)'].includes(currentUser.role)) || 
+                        (currentUser.role === 'Client' && (col.sequence === 1 || col.title.toLowerCase().includes('started') || columns[0]?._id === col._id || columns[0]?.title === col.title))) && (
                         <button
                           onClick={() => {
                             setTicketStatus(col.title);
@@ -1493,20 +1631,37 @@ Figma Reference Link:
                         onDragStart={(e) => e.dataTransfer.setData('text/plain', ticket._id)}
                       >
                         <div onClick={() => onSelectTicket(ticket)} style={styles.ticketCardBody}>
-                          {/* Top Row: Type Logo on Left, Ticket ID & Priority Dot on Extreme Right */}
+                          {/* Top Row: Type Logo & Client Tag on Left, Ticket ID & Priority Dot on Extreme Right */}
                           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                            <span 
-                              title={`Type: ${ticket.ticketType || 'Task'}`} 
-                              style={{ 
-                                fontSize: '14px', 
-                                lineHeight: 1, 
-                                cursor: 'default',
-                                display: 'inline-flex',
-                                alignItems: 'center'
-                              }}
-                            >
-                              {getTicketTypeStyle(ticket.ticketType).icon}
-                            </span>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                              <span 
+                                title={`Type: ${ticket.ticketType || 'Task'}`} 
+                                style={{ 
+                                  fontSize: '14px', 
+                                  lineHeight: 1, 
+                                  cursor: 'default',
+                                  display: 'inline-flex',
+                                  alignItems: 'center'
+                                }}
+                              >
+                                {getTicketTypeStyle(ticket.ticketType).icon}
+                              </span>
+                              {Boolean(ticket.isClientTicket || ticket.reportedByRole === 'Client') && (
+                                <span style={{
+                                  fontSize: '10px',
+                                  fontWeight: '700',
+                                  color: '#2563eb',
+                                  backgroundColor: '#eff6ff',
+                                  border: '1px solid #bfdbfe',
+                                  borderRadius: '4px',
+                                  padding: '1px 5px',
+                                  letterSpacing: '0.3px',
+                                  textTransform: 'uppercase'
+                                }}>
+                                  Client
+                                </span>
+                              )}
+                            </div>
                             <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                               <span style={styles.ticketCardId}>#{ticket._id.slice(-6).toUpperCase()}</span>
                               <span 
@@ -2058,26 +2213,12 @@ Figma Reference Link:
                     boxShadow: isDragOverTicketDropzone ? '0 0 0 3px rgba(37, 99, 235, 0.12)' : 'none'
                   }}
                 >
-                  <textarea
-                    placeholder="Provide ticket details, paste photos/videos directly, or paste Figma/Loom links..."
+                  <RichTextEditorInput
                     value={ticketDesc}
-                    onChange={(e) => setTicketDesc(e.target.value)}
-                    onPaste={handleTicketModalPaste}
-                    style={{
-                      width: '100%',
-                      minHeight: '140px',
-                      padding: '12px 14px',
-                      lineHeight: '1.5',
-                      fontSize: '13px',
-                      border: 'none',
-                      outline: 'none',
-                      backgroundColor: 'transparent',
-                      resize: 'vertical',
-                      fontFamily: 'inherit',
-                      color: 'var(--text-primary)',
-                      boxSizing: 'border-box'
-                    }}
-                    required
+                    onChange={setTicketDesc}
+                    onPasteFiles={handleProcessIncomingTicketFiles}
+                    minHeight="140px"
+                    placeholder="Provide ticket details, paste photos/videos directly, or paste Figma/Loom links..."
                   />
 
                   {/* Attached Image Previews Inside Description */}
@@ -2214,10 +2355,10 @@ Figma Reference Link:
 
                     <span style={{ 
                       fontSize: '11.5px', 
-                      color: getWordCount(ticketDesc) > 200 ? '#ef4444' : '#64748b', 
-                      fontWeight: getWordCount(ticketDesc) > 200 ? '700' : '500' 
+                      color: getWordCountFromHtml(ticketDesc) > 400 ? '#ef4444' : '#64748b', 
+                      fontWeight: getWordCountFromHtml(ticketDesc) > 400 ? '700' : '500' 
                     }}>
-                      Words: {getWordCount(ticketDesc)}/200
+                      Words: {getWordCountFromHtml(ticketDesc)}/400
                     </span>
                   </div>
                 </div>
@@ -3581,22 +3722,29 @@ const styles = {
   },
   modal: {
     width: '100%',
-    maxWidth: '580px',
-    padding: '18px 24px 20px',
+    maxWidth: '1150px',
+    padding: '24px 30px',
     backgroundColor: '#ffffff',
     borderRadius: '16px',
     border: '1px solid rgba(15, 23, 42, 0.08)',
-    boxShadow: '0 20px 50px rgba(0, 0, 0, 0.15)',
+    boxShadow: '0 20px 45px rgba(15, 23, 42, 0.18)',
+    maxHeight: '92vh',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: '16px',
+    color: 'var(--text-primary)',
   },
   modalHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: '12px',
+    marginBottom: '8px',
+    borderBottom: '1px solid var(--panel-border)',
+    paddingBottom: '14px',
   },
   modalTitle: {
-    fontSize: '18px',
-    fontWeight: '700',
+    fontSize: '22px',
+    fontWeight: '600',
     color: 'var(--text-primary)',
     margin: 0,
     lineHeight: 1.2,
@@ -3604,14 +3752,15 @@ const styles = {
   closeBtn: {
     background: 'transparent',
     border: 'none',
-    fontSize: '20px',
+    fontSize: '26px',
     lineHeight: 1,
     color: 'var(--text-secondary)',
     cursor: 'pointer',
-    padding: '2px',
+    padding: '0 6px',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
   },
   modalError: {
     background: 'rgba(255, 69, 58, 0.1)',

@@ -186,10 +186,60 @@ router.get('/users', async (req, res) => {
 
 // --- PROJECTS ---
 
+// Helper to process client user creation or linking
+async function processClientUser(clientName, clientEmail, clientPassword, existingClientUsers = []) {
+  if (!clientEmail || !clientEmail.trim()) {
+    return existingClientUsers || [];
+  }
+  const cleanEmail = clientEmail.trim().toLowerCase();
+  let clientUser = await User.findOne({ email: cleanEmail });
+  if (!clientUser) {
+    const defaultPassword = clientPassword && clientPassword.trim() ? clientPassword.trim() : 'Tunix@5494';
+    const hashedPassword = await bcrypt.hash(defaultPassword, 10);
+    clientUser = new User({
+      name: clientName && clientName.trim() ? clientName.trim() : cleanEmail.split('@')[0],
+      email: cleanEmail,
+      role: 'Client',
+      password: hashedPassword
+    });
+    await clientUser.save();
+  } else {
+    // If password or name update provided
+    if (clientPassword && clientPassword.trim()) {
+      clientUser.password = await bcrypt.hash(clientPassword.trim(), 10);
+    }
+    if (clientName && clientName.trim()) {
+      clientUser.name = clientName.trim();
+    }
+    clientUser.role = 'Client';
+    await clientUser.save();
+  }
+
+  const clientIds = (existingClientUsers || []).map(id => id._id ? id._id.toString() : id.toString());
+  if (!clientIds.includes(clientUser._id.toString())) {
+    clientIds.push(clientUser._id.toString());
+  }
+  return clientIds;
+}
+
 // Create Project (PM only in concept)
 router.post('/projects', async (req, res) => {
   try {
-    const { name, description, deliveryDate, status, totalRevenue, paymentReceived, pendingPayment, teamMembers } = req.body;
+    const { 
+      name, 
+      description, 
+      deliveryDate, 
+      status, 
+      totalRevenue, 
+      paymentReceived, 
+      pendingPayment, 
+      teamMembers,
+      clientName,
+      clientEmail,
+      clientPassword,
+      clientUsers
+    } = req.body;
+
     if (!name || !name.trim()) {
       return res.status(400).json({ error: 'Project name is required.' });
     }
@@ -204,6 +254,11 @@ router.post('/projects', async (req, res) => {
       return res.status(400).json({ error: 'A project with this name already exists. Please choose a unique name.' });
     }
 
+    let finalClientUsers = clientUsers || [];
+    if (clientEmail) {
+      finalClientUsers = await processClientUser(clientName, clientEmail, clientPassword, finalClientUsers);
+    }
+
     const project = new Project({
       name: trimmedName,
       description,
@@ -212,28 +267,44 @@ router.post('/projects', async (req, res) => {
       totalRevenue: Number(totalRevenue) || 0,
       paymentReceived: Number(paymentReceived) || 0,
       pendingPayment: Number(pendingPayment) || 0,
-      teamMembers: teamMembers || []
+      teamMembers: teamMembers || [],
+      clientUsers: finalClientUsers
     });
     await project.save();
-    res.status(201).json(project);
+    
+    const populated = await Project.findById(project._id)
+      .populate('teamMembers', 'name email role')
+      .populate('clientUsers', 'name email role');
+    res.status(201).json(populated);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// Get Projects (CEO gets all, others get assigned projects)
+// Get Projects (CEO gets all, others get assigned projects, Client gets only their project)
 router.get('/projects', async (req, res) => {
   try {
     const { userId, role } = req.query;
     let query = {};
+    const isClient = role === 'Client';
     
-    // Managers (CEO, Delivery Head, PM, PC) get all projects; others get assigned projects
-    const isManager = ['CEO', 'Delivery Head', 'PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)'].includes(role);
-    if (!isManager && userId) {
-      query.teamMembers = userId;
+    if (isClient && userId) {
+      query.$or = [
+        { clientUsers: userId },
+        { teamMembers: userId }
+      ];
+    } else {
+      // Managers (CEO, Delivery Head, PM, PC) get all projects; others get assigned projects
+      const isManager = ['CEO', 'Delivery Head', 'PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)'].includes(role);
+      if (!isManager && userId) {
+        query.teamMembers = userId;
+      }
     }
     
-    const projects = await Project.find(query).populate('teamMembers', 'name email role').sort({ sequence: 1, createdAt: 1 });
+    const projects = await Project.find(query)
+      .populate('teamMembers', 'name email role')
+      .populate('clientUsers', 'name email role')
+      .sort({ sequence: 1, createdAt: 1 });
     
     const projectsWithCount = await Promise.all(projects.map(async (project) => {
       let testingStageTitle = 'Ready for testing';
@@ -261,18 +332,28 @@ router.get('/projects', async (req, res) => {
       
       const readyCount = await Ticket.countDocuments({
         project: project._id,
-        status: testingStageTitle
+        status: testingStageTitle,
+        ...(isClient ? { isClientTicket: true } : {})
       });
 
       const devCount = await Ticket.countDocuments({
         project: project._id,
-        status: { $in: [todoTitle, inProgressTitle] }
+        status: { $in: [todoTitle, inProgressTitle] },
+        ...(isClient ? { isClientTicket: true } : {})
       });
       
       const pObj = project.toObject();
       if (!['In Progress', 'Live', 'On Hold'].includes(pObj.status)) {
         pObj.status = 'In Progress';
       }
+
+      // If client, hide financial details
+      if (isClient) {
+        pObj.totalRevenue = undefined;
+        pObj.paymentReceived = undefined;
+        pObj.pendingPayment = undefined;
+      }
+
       return {
         ...pObj,
         readyForTestingCount: readyCount,
@@ -309,13 +390,35 @@ router.post('/projects/reorder', async (req, res) => {
 // Get Single Project Details
 router.get('/projects/:id', async (req, res) => {
   try {
-    const project = await Project.findById(req.params.id).populate('teamMembers', 'name email role');
+    const { role } = req.query;
+    const isClient = role === 'Client';
+
+    const project = await Project.findById(req.params.id)
+      .populate('teamMembers', 'name email role')
+      .populate('clientUsers', 'name email role');
     if (!project) {
       return res.status(404).json({ error: 'Project not found.' });
     }
-    // Also fetch tickets for this project
-    const tickets = await Ticket.find({ project: req.params.id });
-    res.json({ project, tickets });
+
+    // If client, only fetch tickets reported by client
+    let ticketQuery = { project: req.params.id };
+    if (isClient) {
+      ticketQuery.$or = [
+        { isClientTicket: true },
+        { reportedByRole: 'Client' }
+      ];
+    }
+
+    const tickets = await Ticket.find(ticketQuery);
+
+    const pObj = project.toObject();
+    if (isClient) {
+      pObj.totalRevenue = undefined;
+      pObj.paymentReceived = undefined;
+      pObj.pendingPayment = undefined;
+    }
+
+    res.json({ project: pObj, tickets });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -323,7 +426,22 @@ router.get('/projects/:id', async (req, res) => {
 
 router.put('/projects/:id', async (req, res) => {
   try {
-    const { name, description, deliveryDate, status, totalRevenue, paymentReceived, pendingPayment, teamMembers, columns } = req.body;
+    const { 
+      name, 
+      description, 
+      deliveryDate, 
+      status, 
+      totalRevenue, 
+      paymentReceived, 
+      pendingPayment, 
+      teamMembers, 
+      columns,
+      clientName,
+      clientEmail,
+      clientPassword,
+      clientUsers
+    } = req.body;
+
     const project = await Project.findById(req.params.id);
     if (!project) {
       return res.status(404).json({ error: 'Project not found' });
@@ -356,10 +474,20 @@ router.put('/projects/:id', async (req, res) => {
     if (teamMembers !== undefined) project.teamMembers = teamMembers;
     if (columns) project.columns = columns;
 
+    if (clientUsers !== undefined) {
+      project.clientUsers = clientUsers;
+    }
+
+    if (clientEmail && clientEmail.trim()) {
+      project.clientUsers = await processClientUser(clientName, clientEmail, clientPassword, project.clientUsers);
+    }
+
     await project.save();
     
     // Return populated project
-    const populated = await Project.findById(project._id).populate('teamMembers', 'name email role');
+    const populated = await Project.findById(project._id)
+      .populate('teamMembers', 'name email role')
+      .populate('clientUsers', 'name email role');
     res.json(populated);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -682,16 +810,34 @@ router.delete('/projects/:id/change-requests/:crId', async (req, res) => {
 
 // --- TICKETS ---
 
-// Create Ticket (PM only in concept)
+// Create Ticket
 router.post('/projects/:id/tickets', async (req, res) => {
   try {
-    const { task, ticketType, priority, description, figmaRef, deadline, tags, images, createdBy, status } = req.body;
+    const { 
+      task, 
+      ticketType, 
+      priority, 
+      description, 
+      figmaRef, 
+      deadline, 
+      tags, 
+      images, 
+      createdBy, 
+      status,
+      isClientTicket,
+      reportedBy,
+      reportedByEmail,
+      reportedByRole
+    } = req.body;
+
     if (!task || !description) {
       return res.status(400).json({ error: 'Task title and description are required.' });
     }
     if (task.trim().length > 80) {
       return res.status(400).json({ error: 'Task title cannot exceed 80 characters.' });
     }
+
+    const isClient = Boolean(isClientTicket || reportedByRole === 'Client');
 
     const ticket = new Ticket({
       project: req.params.id,
@@ -704,9 +850,13 @@ router.post('/projects/:id/tickets', async (req, res) => {
       tags: tags || [],
       images: images || [],
       status: status || 'To be started',
+      isClientTicket: isClient,
+      reportedBy: isClient ? (reportedBy || createdBy || 'Client') : (reportedBy || null),
+      reportedByEmail: isClient ? (reportedByEmail || null) : (reportedByEmail || null),
+      reportedByRole: isClient ? 'Client' : (reportedByRole || null),
       history: [{
-        user: createdBy || 'System',
-        action: 'Ticket Created'
+        user: createdBy || (isClient ? 'Client' : 'System'),
+        action: isClient ? 'Ticket Reported by Client' : 'Ticket Created'
       }]
     });
 
@@ -783,9 +933,14 @@ router.put('/tickets/:id', async (req, res) => {
 });
 
 
-// Delete Ticket
+// Delete Ticket (Clients not authorized to delete)
 router.delete('/tickets/:id', async (req, res) => {
   try {
+    const userRole = (req.query.role || req.body.role || '').toLowerCase();
+    if (userRole === 'client') {
+      return res.status(403).json({ error: 'Permission Denied: Clients are not authorized to delete tickets.' });
+    }
+
     const ticket = await Ticket.findByIdAndDelete(req.params.id);
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found.' });

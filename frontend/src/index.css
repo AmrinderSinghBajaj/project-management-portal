@@ -327,3 +327,38 @@ button.danger:hover {
   pointer-events: auto;
   transform: translateY(0) scale(1);
 }
+
+/* WYSIWYG Rich Text Editor Styles */
+.wysiwyg-editor-area:empty:before {
+  content: attr(data-placeholder);
+  color: #94a3b8;
+  pointer-events: none;
+  display: block;
+}
+
+.wysiwyg-editor-area ul,
+.wysiwyg-rendered-content ul {
+  padding-left: 22px !important;
+  margin: 6px 0 !important;
+  list-style-type: disc !important;
+}
+
+.wysiwyg-editor-area ol,
+.wysiwyg-rendered-content ol {
+  padding-left: 22px !important;
+  margin: 6px 0 !important;
+  list-style-type: decimal !important;
+}
+
+.wysiwyg-editor-area li,
+.wysiwyg-rendered-content li {
+  margin-bottom: 3px !important;
+  line-height: 1.5 !important;
+}
+
+.wysiwyg-rendered-content a {
+  color: #2563eb;
+  text-decoration: underline;
+  font-weight: 600;
+  word-break: break-all;
+}

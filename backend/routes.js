@@ -726,7 +726,10 @@ router.delete('/tickets/:id', async (req, res) => {
 router.post('/tickets/:id/comments', async (req, res) => {
   try {
     const { user, comment, images, parentId } = req.body;
-    if (!user || (!comment && (!images || images.length === 0))) {
+    const trimmedComment = typeof comment === 'string' ? comment.trim() : '';
+    const commentImages = Array.isArray(images) ? images : [];
+
+    if (!user || (!trimmedComment && commentImages.length === 0)) {
       return res.status(400).json({ error: 'User and comment text or images are required.' });
     }
 
@@ -737,8 +740,8 @@ router.post('/tickets/:id/comments', async (req, res) => {
 
     ticket.comments.push({ 
       user, 
-      comment: comment || '', 
-      images: images || [],
+      comment: trimmedComment, 
+      images: commentImages,
       parentId: parentId || null 
     });
     await ticket.save();

@@ -1049,7 +1049,9 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                                   {formatTime(comm.timestamp)} - {formatDate(comm.timestamp)}
                                 </span>
                               </div>
-                              <div style={styles.commentBody}>{renderTextWithLinks(comm.comment)}</div>
+                              {comm.comment && comm.comment.trim() && (
+                                <div style={styles.commentBody}>{renderTextWithLinks(comm.comment)}</div>
+                              )}
                               {comm.images && comm.images.length > 0 && (
                                 <div style={styles.commentImagesGrid}>
                                   {comm.images.map((cImg, cIdx) => (
@@ -1213,7 +1215,9 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                                             {formatTime(reply.timestamp)} - {formatDate(reply.timestamp)}
                                           </span>
                                         </div>
-                                        <div style={styles.commentBody}>{renderTextWithLinks(reply.comment)}</div>
+                                        {reply.comment && reply.comment.trim() && (
+                                          <div style={styles.commentBody}>{renderTextWithLinks(reply.comment)}</div>
+                                        )}
                                         {reply.images && reply.images.length > 0 && (
                                           <div style={styles.commentImagesGrid}>
                                             {reply.images.map((rImg, rIdx) => (
@@ -1389,7 +1393,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                   e.target.value = '';
                 }
               }}
-              accept="image/*"
+              accept="image/*,video/*"
               multiple
               style={{ display: 'none' }}
             />

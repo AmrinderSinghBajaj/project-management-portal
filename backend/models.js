@@ -99,7 +99,7 @@ const TicketSchema = new mongoose.Schema({
   },
   comments: [{
     user: { type: String, required: true },
-    comment: { type: String, required: true },
+    comment: { type: String, default: '' },
     images: [{ type: String }],
     timestamp: { type: Date, default: Date.now },
     parentId: { type: String, default: null },

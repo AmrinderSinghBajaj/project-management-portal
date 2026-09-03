@@ -421,6 +421,10 @@ Figma Reference Link:
   const handleTicketModalPaste = (e) => {
     if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
       const files = Array.from(e.clipboardData.files);
+      const hasVideo = files.some(f => isVideoFile(f));
+      if (hasVideo) {
+        setShowVideoPrompt(true);
+      }
       const imageFiles = files.filter(f => isImageFile(f));
       if (imageFiles.length > 0) {
         e.preventDefault();
@@ -2021,54 +2025,15 @@ Figma Reference Link:
               </div>
 
               <div style={styles.modalInputGroup}>
-                <label style={styles.formFieldLabel}>Description</label>
-                <textarea
-                  placeholder="Provide ticket details or paste Figma reference..."
-                  value={ticketDesc}
-                  onChange={(e) => setTicketDesc(e.target.value)}
-                  style={{
-                    minHeight: '160px',
-                    padding: '12px 14px',
-                    lineHeight: '1.5',
-                    fontSize: '13px',
-                    borderRadius: '8px',
-                    resize: 'vertical',
-                    fontFamily: 'inherit'
-                  }}
-                  required
-                />
-                <span style={styles.wordCount}>
-                  Words: {getWordCount(ticketDesc)}/200
-                </span>
-              </div>
-
-              {/* Image Attachments Section */}
-              <div style={styles.modalInputGroup}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-                  <label style={styles.formFieldLabel}>
-                    Image Attachments ({ticketImages.length}/7)
-                  </label>
+                  <label style={styles.formFieldLabel}>Description</label>
                   <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                    Drag & drop, paste (Ctrl+V), or browse
+                    Paste (Ctrl+V) or drop photos / media
                   </span>
                 </div>
 
-                <input
-                  type="file"
-                  ref={ticketFileInputRef}
-                  onChange={(e) => {
-                    if (e.target.files && e.target.files.length > 0) {
-                      handleProcessIncomingTicketFiles(e.target.files);
-                      e.target.value = '';
-                    }
-                  }}
-                  accept="image/*"
-                  multiple
-                  style={{ display: 'none' }}
-                />
-
+                {/* Integrated Description & Media Container */}
                 <div
-                  onClick={() => ticketFileInputRef.current?.click()}
                   onDragOver={(e) => {
                     e.preventDefault();
                     setIsDragOverTicketDropzone(true);
@@ -2082,100 +2047,180 @@ Figma Reference Link:
                     }
                   }}
                   style={{
-                    border: isDragOverTicketDropzone ? '2px dashed var(--accent-blue, #2563eb)' : '2px dashed #cbd5e1',
-                    backgroundColor: isDragOverTicketDropzone ? 'rgba(37, 99, 235, 0.05)' : '#f8fafc',
+                    position: 'relative',
+                    border: isDragOverTicketDropzone ? '2px dashed var(--accent-blue, #2563eb)' : '1px solid #cbd5e1',
+                    backgroundColor: isDragOverTicketDropzone ? 'rgba(37, 99, 235, 0.04)' : '#ffffff',
                     borderRadius: '10px',
-                    padding: '14px',
-                    textAlign: 'center',
-                    cursor: 'pointer',
                     transition: 'all 0.2s ease',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    boxShadow: isDragOverTicketDropzone ? '0 0 0 3px rgba(37, 99, 235, 0.12)' : 'none'
                   }}
                 >
-                  <div style={{ fontSize: '20px', marginBottom: '3px' }}>🖼️</div>
-                  <div style={{ fontSize: '13px', fontWeight: '600', color: 'var(--text-primary)' }}>
-                    Click to upload images, drag & drop, or paste (Ctrl+V)
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: '#64748b', marginTop: '2px' }}>
-                    Supports all image formats • Max 7 images • Auto-compressed if &gt; 2MB
-                  </div>
-                </div>
+                  <textarea
+                    placeholder="Provide ticket details, paste photos/videos directly, or paste Figma/Loom links..."
+                    value={ticketDesc}
+                    onChange={(e) => setTicketDesc(e.target.value)}
+                    onPaste={handleTicketModalPaste}
+                    style={{
+                      width: '100%',
+                      minHeight: '140px',
+                      padding: '12px 14px',
+                      lineHeight: '1.5',
+                      fontSize: '13px',
+                      border: 'none',
+                      outline: 'none',
+                      backgroundColor: 'transparent',
+                      resize: 'vertical',
+                      fontFamily: 'inherit',
+                      color: 'var(--text-primary)',
+                      boxSizing: 'border-box'
+                    }}
+                    required
+                  />
 
-                {isCompressingImages && (
-                  <div style={{ fontSize: '12px', color: 'var(--accent-blue)', marginTop: '6px', fontWeight: '500' }}>
-                    ⏳ Optimizing and compressing images...
-                  </div>
-                )}
-
-                {/* Selected Image Previews */}
-                {ticketImages.length > 0 && (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '10px' }}>
-                    {ticketImages.map((imgObj, idx) => (
-                      <div
-                        key={idx}
-                        style={{
-                          position: 'relative',
-                          width: '76px',
-                          height: '76px',
-                          borderRadius: '8px',
-                          overflow: 'hidden',
-                          border: '1px solid #e2e8f0',
-                          backgroundColor: '#f1f5f9'
-                        }}
-                      >
-                        <img
-                          src={imgObj.previewUrl}
-                          alt={`Attachment ${idx + 1}`}
-                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                        />
-                        {imgObj.isCompressed && (
-                          <span
+                  {/* Attached Image Previews Inside Description */}
+                  {ticketImages.length > 0 && (
+                    <div style={{ padding: '0 12px 10px 12px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                      {ticketImages.map((imgObj, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            position: 'relative',
+                            width: '68px',
+                            height: '68px',
+                            borderRadius: '8px',
+                            overflow: 'hidden',
+                            border: '1px solid #e2e8f0',
+                            backgroundColor: '#f1f5f9',
+                            boxShadow: '0 1px 3px rgba(0,0,0,0.06)'
+                          }}
+                        >
+                          <img
+                            src={imgObj.previewUrl}
+                            alt={`Attachment ${idx + 1}`}
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                          {imgObj.isCompressed && (
+                            <span
+                              style={{
+                                position: 'absolute',
+                                bottom: '2px',
+                                left: '2px',
+                                backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                                color: '#ffffff',
+                                fontSize: '8.5px',
+                                fontWeight: '700',
+                                padding: '1px 3px',
+                                borderRadius: '3px'
+                              }}
+                              title={`Compressed from ${formatFileSize(imgObj.originalSize)} to ${formatFileSize(imgObj.compressedSize)}`}
+                            >
+                              ~1MB
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleRemoveTicketImage(idx);
+                            }}
                             style={{
                               position: 'absolute',
-                              bottom: '2px',
-                              left: '2px',
-                              backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                              top: '2px',
+                              right: '2px',
+                              backgroundColor: 'rgba(15, 23, 42, 0.75)',
                               color: '#ffffff',
-                              fontSize: '9px',
-                              fontWeight: '700',
-                              padding: '1px 4px',
-                              borderRadius: '4px'
+                              border: 'none',
+                              borderRadius: '50%',
+                              width: '18px',
+                              height: '18px',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              fontSize: '10px',
+                              cursor: 'pointer',
+                              padding: 0
                             }}
-                            title={`Compressed from ${formatFileSize(imgObj.originalSize)} to ${formatFileSize(imgObj.compressedSize)}`}
+                            title="Remove photo"
                           >
-                            ~1MB
-                          </span>
-                        )}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemoveTicketImage(idx);
-                          }}
-                          style={{
-                            position: 'absolute',
-                            top: '2px',
-                            right: '2px',
-                            backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                            color: '#ffffff',
-                            border: 'none',
-                            borderRadius: '50%',
-                            width: '20px',
-                            height: '20px',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            fontSize: '11px',
-                            cursor: 'pointer',
-                            padding: 0
-                          }}
-                          title="Remove image"
-                        >
-                          ✕
-                        </button>
-                      </div>
-                    ))}
+                            ✕
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {isCompressingImages && (
+                    <div style={{ padding: '0 12px 8px 12px', fontSize: '11.5px', color: 'var(--accent-blue)', fontWeight: '500' }}>
+                      ⏳ Optimizing and compressing image...
+                    </div>
+                  )}
+
+                  {/* Description Box Bottom Toolbar */}
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    padding: '8px 12px',
+                    backgroundColor: '#f8fafc',
+                    borderTop: '1px solid #f1f5f9',
+                    fontSize: '12px'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="file"
+                        ref={ticketFileInputRef}
+                        onChange={(e) => {
+                          if (e.target.files && e.target.files.length > 0) {
+                            handleProcessIncomingTicketFiles(e.target.files);
+                            e.target.value = '';
+                          }
+                        }}
+                        accept="image/*,video/*"
+                        multiple
+                        style={{ display: 'none' }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => ticketFileInputRef.current?.click()}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '5px',
+                          padding: '5px 10px',
+                          backgroundColor: '#ffffff',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '6px',
+                          fontSize: '11.5px',
+                          fontWeight: '600',
+                          color: '#334155',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s ease'
+                        }}
+                        title="Upload or attach photos / videos"
+                      >
+                        <span>📷</span>
+                        <span>{ticketImages.length > 0 ? `Add Photos (${ticketImages.length}/7)` : 'Attach Photo / Video'}</span>
+                      </button>
+
+                      {isDragOverTicketDropzone && (
+                        <span style={{ fontSize: '11.5px', color: 'var(--accent-blue)', fontWeight: '600' }}>
+                          Drop files here to attach
+                        </span>
+                      )}
+                    </div>
+
+                    <span style={{ 
+                      fontSize: '11.5px', 
+                      color: getWordCount(ticketDesc) > 200 ? '#ef4444' : '#64748b', 
+                      fontWeight: getWordCount(ticketDesc) > 200 ? '700' : '500' 
+                    }}>
+                      Words: {getWordCount(ticketDesc)}/200
+                    </span>
                   </div>
-                )}
+                </div>
               </div>
 
               <div style={styles.modalFooter}>

@@ -725,39 +725,13 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                  <label style={styles.formLabel}>Description</label>
-                  <textarea
-                    value={editDesc}
-                    onChange={(e) => setEditDesc(e.target.value)}
-                    style={styles.editTextarea}
-                    rows={4}
-                    required
-                  />
-                </div>
-
-                {/* Edit Mode Image Attachments */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <label style={styles.formLabel}>Image Attachments ({editImages.length}/7)</label>
-                    <span style={{ fontSize: '11px', color: '#64748b' }}>Drag & drop, paste, or browse</span>
+                    <label style={styles.formLabel}>Description</label>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>Paste (Ctrl+V) or drop photos / media</span>
                   </div>
 
-                  <input
-                    type="file"
-                    ref={editImageFileInputRef}
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files.length > 0) {
-                        handleProcessIncomingEditImages(e.target.files);
-                        e.target.value = '';
-                      }
-                    }}
-                    accept="image/*"
-                    multiple
-                    style={{ display: 'none' }}
-                  />
-
+                  {/* Integrated Description & Attachments Box */}
                   <div
-                    onClick={() => editImageFileInputRef.current?.click()}
                     onDragOver={(e) => {
                       e.preventDefault();
                       setIsEditDragOver(true);
@@ -770,113 +744,193 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                         handleProcessIncomingEditImages(e.dataTransfer.files);
                       }
                     }}
-                    onPaste={(e) => {
-                      if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
-                        const imageFiles = Array.from(e.clipboardData.files).filter(f => isImageFile(f));
-                        if (imageFiles.length > 0) {
-                          e.preventDefault();
-                          handleProcessIncomingEditImages(imageFiles);
-                        }
-                      }
-                    }}
                     style={{
-                      border: isEditDragOver ? '2px dashed var(--accent-blue, #2563eb)' : '2px dashed #cbd5e1',
-                      backgroundColor: isEditDragOver ? 'rgba(37, 99, 235, 0.05)' : '#ffffff',
+                      position: 'relative',
+                      border: isEditDragOver ? '2px dashed var(--accent-blue, #2563eb)' : '1px solid #cbd5e1',
+                      backgroundColor: isEditDragOver ? 'rgba(37, 99, 235, 0.04)' : '#ffffff',
                       borderRadius: '8px',
-                      padding: '12px',
-                      textAlign: 'center',
-                      cursor: 'pointer',
                       transition: 'all 0.2s ease',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      overflow: 'hidden',
+                      boxShadow: isEditDragOver ? '0 0 0 3px rgba(37, 99, 235, 0.12)' : 'none'
                     }}
                   >
-                    <div style={{ fontSize: '16px', marginBottom: '2px' }}>🖼️</div>
-                    <div style={{ fontSize: '12.5px', fontWeight: '600', color: 'var(--text-primary)' }}>
-                      Click to upload images, drag & drop, or paste (Ctrl+V)
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                      Max 7 images • Auto-compressed if &gt; 2MB
-                    </div>
-                  </div>
+                    <textarea
+                      value={editDesc}
+                      onChange={(e) => setEditDesc(e.target.value)}
+                      onPaste={(e) => {
+                        if (e.clipboardData && e.clipboardData.files && e.clipboardData.files.length > 0) {
+                          const files = Array.from(e.clipboardData.files);
+                          if (files.some(f => isVideoFile(f))) {
+                            setShowVideoPrompt(true);
+                          }
+                          const imageFiles = files.filter(f => isImageFile(f));
+                          if (imageFiles.length > 0) {
+                            e.preventDefault();
+                            handleProcessIncomingEditImages(imageFiles);
+                          }
+                        }
+                      }}
+                      placeholder="Provide ticket details, paste photos/videos directly, or paste Figma/Loom links..."
+                      style={{
+                        width: '100%',
+                        minHeight: '130px',
+                        padding: '10px 12px',
+                        lineHeight: '1.5',
+                        fontSize: '13px',
+                        border: 'none',
+                        outline: 'none',
+                        backgroundColor: 'transparent',
+                        resize: 'vertical',
+                        fontFamily: 'inherit',
+                        color: 'var(--text-primary)',
+                        boxSizing: 'border-box'
+                      }}
+                      rows={4}
+                      required
+                    />
 
-                  {isCompressingEditImages && (
-                    <div style={{ fontSize: '12px', color: 'var(--accent-blue)', fontWeight: '500' }}>
-                      ⏳ Optimizing and compressing images...
-                    </div>
-                  )}
-
-                  {/* Staged Edit Images */}
-                  {editImages.length > 0 && (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginTop: '6px' }}>
-                      {editImages.map((imgItem, idx) => {
-                        const isString = typeof imgItem === 'string';
-                        const previewSrc = isString ? getFullImageUrl(imgItem) : imgItem.previewUrl;
-                        return (
-                          <div
-                            key={idx}
-                            style={{
-                              position: 'relative',
-                              width: '68px',
-                              height: '68px',
-                              borderRadius: '6px',
-                              overflow: 'hidden',
-                              border: '1px solid #cbd5e1',
-                              backgroundColor: '#f1f5f9'
-                            }}
-                          >
-                            <img
-                              src={previewSrc}
-                              alt={`Attachment ${idx + 1}`}
-                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                            />
-                            {!isString && imgItem.isCompressed && (
-                              <span
+                    {/* Staged Edit Images inside Description Box */}
+                    {editImages.length > 0 && (
+                      <div style={{ padding: '0 10px 8px 10px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                        {editImages.map((imgItem, idx) => {
+                          const isString = typeof imgItem === 'string';
+                          const previewSrc = isString ? getFullImageUrl(imgItem) : imgItem.previewUrl;
+                          return (
+                            <div
+                              key={idx}
+                              style={{
+                                position: 'relative',
+                                width: '64px',
+                                height: '64px',
+                                borderRadius: '6px',
+                                overflow: 'hidden',
+                                border: '1px solid #cbd5e1',
+                                backgroundColor: '#f1f5f9',
+                                boxShadow: '0 1px 2px rgba(0,0,0,0.06)'
+                              }}
+                            >
+                              <img
+                                src={previewSrc}
+                                alt={`Attachment ${idx + 1}`}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              />
+                              {!isString && imgItem.isCompressed && (
+                                <span
+                                  style={{
+                                    position: 'absolute',
+                                    bottom: '2px',
+                                    left: '2px',
+                                    backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                                    color: '#ffffff',
+                                    fontSize: '8.5px',
+                                    fontWeight: '700',
+                                    padding: '1px 3px',
+                                    borderRadius: '3px'
+                                  }}
+                                >
+                                  ~1MB
+                                </span>
+                              )}
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleRemoveEditImage(idx);
+                                }}
                                 style={{
                                   position: 'absolute',
-                                  bottom: '2px',
-                                  left: '2px',
-                                  backgroundColor: 'rgba(16, 185, 129, 0.9)',
+                                  top: '2px',
+                                  right: '2px',
+                                  backgroundColor: 'rgba(15, 23, 42, 0.75)',
                                   color: '#ffffff',
-                                  fontSize: '8.5px',
-                                  fontWeight: '700',
-                                  padding: '1px 3px',
-                                  borderRadius: '3px'
+                                  border: 'none',
+                                  borderRadius: '50%',
+                                  width: '18px',
+                                  height: '18px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  fontSize: '10px',
+                                  cursor: 'pointer',
+                                  padding: 0
                                 }}
+                                title="Remove image"
                               >
-                                ~1MB
-                              </span>
-                            )}
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleRemoveEditImage(idx);
-                              }}
-                              style={{
-                                position: 'absolute',
-                                top: '2px',
-                                right: '2px',
-                                backgroundColor: 'rgba(15, 23, 42, 0.75)',
-                                color: '#ffffff',
-                                border: 'none',
-                                borderRadius: '50%',
-                                width: '18px',
-                                height: '18px',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                                fontSize: '10px',
-                                cursor: 'pointer',
-                                padding: 0
-                              }}
-                              title="Remove image"
-                            >
-                              ✕
-                            </button>
-                          </div>
-                        );
-                      })}
+                                ✕
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {isCompressingEditImages && (
+                      <div style={{ padding: '0 10px 6px 10px', fontSize: '11.5px', color: 'var(--accent-blue)', fontWeight: '500' }}>
+                        ⏳ Optimizing and compressing images...
+                      </div>
+                    )}
+
+                    {/* Integrated Toolbar Footer inside Description Box */}
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 10px',
+                      backgroundColor: '#f8fafc',
+                      borderTop: '1px solid #f1f5f9',
+                      fontSize: '12px'
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="file"
+                          ref={editImageFileInputRef}
+                          onChange={(e) => {
+                            if (e.target.files && e.target.files.length > 0) {
+                              handleProcessIncomingEditImages(e.target.files);
+                              e.target.value = '';
+                            }
+                          }}
+                          accept="image/*,video/*"
+                          multiple
+                          style={{ display: 'none' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => editImageFileInputRef.current?.click()}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            padding: '4px 9px',
+                            backgroundColor: '#ffffff',
+                            border: '1px solid #cbd5e1',
+                            borderRadius: '6px',
+                            fontSize: '11.5px',
+                            fontWeight: '600',
+                            color: '#334155',
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease'
+                          }}
+                          title="Upload or attach photos / videos"
+                        >
+                          <span>📷</span>
+                          <span>{editImages.length > 0 ? `Add Photos (${editImages.length}/7)` : 'Attach Photo / Video'}</span>
+                        </button>
+
+                        {isEditDragOver && (
+                          <span style={{ fontSize: '11.5px', color: 'var(--accent-blue)', fontWeight: '600' }}>
+                            Drop files here
+                          </span>
+                        )}
+                      </div>
+
+                      <span style={{ fontSize: '11px', color: '#64748b' }}>
+                        Max 7 images
+                      </span>
                     </div>
-                  )}
+                  </div>
                 </div>
               </form>
             ) : (

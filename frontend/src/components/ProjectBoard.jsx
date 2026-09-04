@@ -336,23 +336,18 @@ export default function ProjectBoard({
     return str.trim().split(/\s+/).filter(Boolean).length;
   };
 
-  const BUG_TEMPLATE = `Steps to Reproduce:
-1. 
-2. 
-3. 
-
-Expected Result: 
-
-Figma Reference Link: 
-`;
+  const BUG_TEMPLATE = `<p><strong>Steps to Reproduce:</strong></p><p>1. </p><p>2. </p><p>3. </p><p><br></p><p><strong>Expected Result:</strong></p><p><br></p><p><strong>Figma Reference Link:</strong></p><p><br></p>`;
 
   const handleTicketTypeChange = (newType) => {
     setTicketType(newType);
     if (newType === 'Bug') {
-      if (!ticketDesc.trim() || ticketDesc.startsWith('Steps to Reproduce:')) {
+      const isDescEmptyOrBugTemplate = !ticketDesc.trim() || 
+                                       ticketDesc === '<p><br></p>' || 
+                                       ticketDesc.includes('Steps to Reproduce');
+      if (isDescEmptyOrBugTemplate) {
         setTicketDesc(BUG_TEMPLATE);
       }
-    } else if (ticketDesc.startsWith('Steps to Reproduce:') && ticketDesc.includes('Figma Reference')) {
+    } else if (ticketDesc.includes('Steps to Reproduce') && ticketDesc.includes('Figma Reference')) {
       setTicketDesc('');
     }
   };

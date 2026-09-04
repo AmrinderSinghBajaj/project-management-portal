@@ -643,6 +643,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
                     type={showClientPassword ? 'text' : 'password'}
                     value={clientPassword}
                     onChange={(e) => setClientPassword(e.target.value)}
+                    placeholder={projectToEdit ? "Leave blank to keep current password" : "Enter password (default: Tunix@5494)"}
                     style={{ fontSize: '12.5px', padding: '7px 30px 7px 10px', width: '100%' }}
                   />
                   <button
@@ -663,6 +664,11 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
                     {showClientPassword ? '🙈' : '👁️'}
                   </button>
                 </div>
+                {projectToEdit && (
+                  <span style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '3px' }}>
+                    Type a new password to reset it, or leave blank to keep existing.
+                  </span>
+                )}
               </div>
             </div>
           </div>

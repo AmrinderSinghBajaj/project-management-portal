@@ -134,7 +134,10 @@ router.post('/users/login', async (req, res) => {
     if (!email || !password) {
       return res.status(400).json({ error: 'Email and password are required.' });
     }
-    const user = await User.findOne({ email });
+    const cleanEmail = email.trim();
+    const user = await User.findOne({
+      email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
+    });
     if (!user) {
       return res.status(404).json({ error: 'User not found. Please sign up.' });
     }
@@ -192,7 +195,11 @@ async function processClientUser(clientName, clientEmail, clientPassword, existi
     return existingClientUsers || [];
   }
   const cleanEmail = clientEmail.trim().toLowerCase();
-  let clientUser = await User.findOne({ email: cleanEmail });
+  const escapedEmail = cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let clientUser = await User.findOne({ 
+    email: { $regex: new RegExp(`^${escapedEmail}$`, 'i') } 
+  });
+
   if (!clientUser) {
     const defaultPassword = clientPassword && clientPassword.trim() ? clientPassword.trim() : 'Tunix@5494';
     const hashedPassword = await bcrypt.hash(defaultPassword, 10);
@@ -203,9 +210,11 @@ async function processClientUser(clientName, clientEmail, clientPassword, existi
       password: hashedPassword
     });
     await clientUser.save();
+    console.log(`[processClientUser] Created new Client user: ${cleanEmail}`);
   } else {
     // If password or name update provided
-    if (clientPassword && clientPassword.trim()) {
+    const passwordUpdated = Boolean(clientPassword && clientPassword.trim());
+    if (passwordUpdated) {
       clientUser.password = await bcrypt.hash(clientPassword.trim(), 10);
     }
     if (clientName && clientName.trim()) {
@@ -213,6 +222,7 @@ async function processClientUser(clientName, clientEmail, clientPassword, existi
     }
     clientUser.role = 'Client';
     await clientUser.save();
+    console.log(`[processClientUser] Updated Client user: ${clientUser.email}, password updated: ${passwordUpdated}`);
   }
 
   const clientIds = (existingClientUsers || []).map(id => id._id ? id._id.toString() : id.toString());

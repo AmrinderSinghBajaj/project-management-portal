@@ -383,7 +383,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
   }, []);
 
   useEffect(() => {
-    if (projectToEdit && users.length > 0) {
+    if (projectToEdit) {
       setName(projectToEdit.name || '');
       setDescription(projectToEdit.description || '');
       setTotalRevenue(projectToEdit.totalRevenue !== undefined ? projectToEdit.totalRevenue : '');
@@ -392,10 +392,15 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
       
       if (projectToEdit.clientUsers && projectToEdit.clientUsers.length > 0) {
         const cUser = projectToEdit.clientUsers[0];
-        const cUserObj = typeof cUser === 'object' ? cUser : users.find(u => u._id === cUser);
-        if (cUserObj) {
-          setClientName(cUserObj.name || '');
-          setClientEmail(cUserObj.email || '');
+        if (typeof cUser === 'object' && cUser !== null) {
+          setClientName(cUser.name || '');
+          setClientEmail(cUser.email || '');
+        } else {
+          const cUserObj = users.find(u => u._id === cUser);
+          if (cUserObj) {
+            setClientName(cUserObj.name || '');
+            setClientEmail(cUserObj.email || '');
+          }
         }
       }
 
@@ -409,7 +414,7 @@ export default function CreateProjectModal({ onClose, onSuccess, projectToEdit, 
       
       const newAssignments = createEmptyAssignments();
 
-      if (projectToEdit.teamMembers && Array.isArray(projectToEdit.teamMembers)) {
+      if (projectToEdit.teamMembers && Array.isArray(projectToEdit.teamMembers) && users.length > 0) {
         projectToEdit.teamMembers.forEach(member => {
           const memberId = typeof member === 'object' ? member._id : member;
           const memberObj = users.find(u => u._id === memberId);

@@ -26,6 +26,7 @@ const sanitizeUser = (user) => {
     name: user.name,
     email: user.email,
     role: user.role,
+    isActive: user.isActive !== false,
     createdAt: user.createdAt,
     updatedAt: user.updatedAt
   };
@@ -100,10 +101,19 @@ router.post('/upload-images', (req, res) => {
 
 // --- AUTH & USERS ---
 
-// Signup
+// Signup (Restricted: Only Amrinder PM can create users)
 router.post('/users/signup', async (req, res) => {
   try {
-    const { name, email, role, password } = req.body;
+    const { name, email, role, password, adminEmail } = req.body;
+    
+    // Check authorization: Only amrinderpm@apptunix.com can create users
+    const callerAdminEmail = (adminEmail || '').trim().toLowerCase();
+    if (callerAdminEmail !== 'amrinderpm@apptunix.com') {
+      return res.status(403).json({ 
+        error: 'Public registration is disabled. Only amrinderpm@apptunix.com is authorized to create user accounts.' 
+      });
+    }
+
     if (!name || !email || !role || !password) {
       return res.status(400).json({ error: 'Name, email, role, and password are required.' });
     }
@@ -111,17 +121,155 @@ router.post('/users/signup', async (req, res) => {
       return res.status(400).json({ error: 'Password must be at least 4 characters long.' });
     }
     // Check if user already exists
-    let user = await User.findOne({ email });
+    const cleanEmail = email.trim().toLowerCase();
+    let user = await User.findOne({ 
+      email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } 
+    });
     if (user) {
       return res.status(400).json({ error: 'User with this email already exists.' });
     }
     // Securely hash password with bcrypt
     const hashedPassword = await bcrypt.hash(password, 10);
-    user = new User({ name, email, role, password: hashedPassword });
+    user = new User({ 
+      name: name.trim(), 
+      email: cleanEmail, 
+      role, 
+      password: hashedPassword,
+      plainPassword: password 
+    });
     await user.save();
 
-    const token = generateToken(user);
-    res.status(201).json({ token, user: sanitizeUser(user) });
+    res.status(201).json({ message: 'User created successfully', user: sanitizeUser(user) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin Create User Endpoint (Strictly amrinderpm@apptunix.com)
+router.post('/users/admin-create', async (req, res) => {
+  try {
+    const { name, email, role, password, adminEmail } = req.body;
+    const callerAdminEmail = (adminEmail || '').trim().toLowerCase();
+    if (callerAdminEmail !== 'amrinderpm@apptunix.com') {
+      return res.status(403).json({ 
+        error: 'Permission Denied: Only amrinderpm@apptunix.com has permission to create and provision new accounts.' 
+      });
+    }
+
+    if (!name || !email || !role || !password) {
+      return res.status(400).json({ error: 'Name, email, role, and password are required.' });
+    }
+    if (password.length < 4) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters long.' });
+    }
+
+    const cleanEmail = email.trim().toLowerCase();
+    let user = await User.findOne({ 
+      email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') } 
+    });
+    if (user) {
+      return res.status(400).json({ error: 'A user with this email already exists.' });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+    user = new User({ 
+      name: name.trim(), 
+      email: cleanEmail, 
+      role, 
+      password: hashedPassword,
+      plainPassword: password 
+    });
+    await user.save();
+
+    res.status(201).json({ message: 'User provisioned successfully', user: sanitizeUser(user) });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin Reset User Password
+router.put('/users/:id/reset-password', async (req, res) => {
+  try {
+    const { newPassword, adminEmail } = req.body;
+    const callerAdminEmail = (adminEmail || '').trim().toLowerCase();
+    if (callerAdminEmail !== 'amrinderpm@apptunix.com') {
+      return res.status(403).json({ 
+        error: 'Permission Denied: Only amrinderpm@apptunix.com can reset user credentials.' 
+      });
+    }
+
+    if (!newPassword || newPassword.length < 4) {
+      return res.status(400).json({ error: 'Password must be at least 4 characters long.' });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    user.password = await bcrypt.hash(newPassword, 10);
+    user.plainPassword = newPassword;
+    await user.save();
+
+    res.json({ message: `Password for ${user.name} (${user.email}) updated successfully.`, plainPassword: newPassword });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin Toggle User Status (Enable / Disable)
+router.put('/users/:id/toggle-status', async (req, res) => {
+  try {
+    const { adminEmail, isActive } = req.body;
+    const callerAdminEmail = (adminEmail || '').trim().toLowerCase();
+    if (callerAdminEmail !== 'amrinderpm@apptunix.com') {
+      return res.status(403).json({ 
+        error: 'Permission Denied: Only amrinderpm@apptunix.com can toggle user account status.' 
+      });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    if (user.email.toLowerCase() === 'amrinderpm@apptunix.com') {
+      return res.status(400).json({ error: 'Cannot deactivate the master admin account.' });
+    }
+
+    user.isActive = (isActive !== undefined) ? Boolean(isActive) : !user.isActive;
+    await user.save();
+
+    res.json({ 
+      message: `User ${user.name} (${user.email}) is now ${user.isActive ? 'Active' : 'Disabled'}.`, 
+      user: sanitizeUser(user) 
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Admin Delete User
+router.delete('/users/:id', async (req, res) => {
+  try {
+    const adminEmail = (req.body?.adminEmail || req.query?.adminEmail || '').trim().toLowerCase();
+    if (adminEmail !== 'amrinderpm@apptunix.com') {
+      return res.status(403).json({ 
+        error: 'Permission Denied: Only amrinderpm@apptunix.com can delete accounts.' 
+      });
+    }
+
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: 'User not found.' });
+    }
+
+    if (user.email.toLowerCase() === 'amrinderpm@apptunix.com') {
+      return res.status(400).json({ error: 'Cannot delete the master admin account.' });
+    }
+
+    await User.findByIdAndDelete(req.params.id);
+    res.json({ message: `User ${user.name} (${user.email}) deleted successfully.` });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -139,7 +287,14 @@ router.post('/users/login', async (req, res) => {
       email: { $regex: new RegExp(`^${cleanEmail.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') }
     });
     if (!user) {
-      return res.status(404).json({ error: 'User not found. Please sign up.' });
+      return res.status(404).json({ error: 'User account not found. Please contact administrator (amrinderpm@apptunix.com) for access.' });
+    }
+
+    // Check if account has been disabled by admin
+    if (user.isActive === false) {
+      return res.status(403).json({ 
+        error: 'Your account has been deactivated by administrator. Please contact amrinderpm@apptunix.com for access.' 
+      });
     }
 
     // Secure password comparison (supports both bcrypt hashed & automatic legacy password upgrade)
@@ -176,11 +331,22 @@ router.get('/users/me', authenticateToken, async (req, res) => {
   }
 });
 
-// Get all users (useful for PM assigning team members - password excluded)
+// Get all users (useful for PM assigning team members, with passwords for amrinderpm@apptunix.com)
 router.get('/users', async (req, res) => {
   try {
-    const users = await User.find({}, '-password');
-    res.json(users);
+    const adminEmail = (req.query.adminEmail || '').trim().toLowerCase();
+    const isMasterAdmin = adminEmail === 'amrinderpm@apptunix.com';
+
+    const users = await User.find({}).sort({ createdAt: -1 });
+    const formatted = users.map(u => {
+      const sanitized = sanitizeUser(u);
+      if (isMasterAdmin) {
+        sanitized.plainPassword = u.plainPassword || (u.password && !u.password.startsWith('$') ? u.password : 'Tunix@5494');
+      }
+      return sanitized;
+    });
+
+    res.json(formatted);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }

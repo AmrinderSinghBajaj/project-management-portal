@@ -16,7 +16,9 @@ const UserSchema = new mongoose.Schema({
       'Angular Developer', 'Frontend Designer', 'Backend Developer', 'Delivery Head',
       'Product Owner', 'Client'
     ]
-  }
+  },
+  isActive: { type: Boolean, default: true },
+  plainPassword: { type: String, default: 'Tunix@5494' }
 }, { timestamps: true });
 
 // Project Schema

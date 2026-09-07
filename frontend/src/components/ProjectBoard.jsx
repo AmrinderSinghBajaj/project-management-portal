@@ -950,8 +950,8 @@ export default function ProjectBoard({
         </div>
         
         <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Payments & Financials: ONLY visible to PM and PC */}
-          {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO'].includes(currentUser?.role) && (
+          {/* Payments & Financials: ONLY visible to PM, PC, Delivery Head, CEO */}
+          {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO', 'Delivery Head'].includes(currentUser?.role) && (
             <div style={{ position: 'relative' }}>
               <button
                 type="button"
@@ -1134,7 +1134,7 @@ export default function ProjectBoard({
             </div>
           )}
 
-          {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO'].includes(currentUser?.role) && (
+          {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO', 'Delivery Head'].includes(currentUser?.role) && (
             <div style={{ position: 'relative' }}>
               <button
                 onClick={() => setShowSettingsMenu(!showSettingsMenu)}
@@ -1550,7 +1550,7 @@ export default function ProjectBoard({
             </div>
           )}
 
-          {activeTab === 'cr' && ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)'].includes(currentUser.role) && (
+          {activeTab === 'cr' && ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO', 'Delivery Head'].includes(currentUser.role) && (
             <button onClick={() => setShowAddCR(true)} style={styles.headerAddBtn}>
               + Add CR
             </button>
@@ -1598,7 +1598,7 @@ export default function ProjectBoard({
                   <div style={styles.columnHeader}>
                     <span style={styles.columnTitle}>{col.title}</span>
                     <div style={styles.columnMeta}>
-                      {((['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'QA', 'Quality Analyst (QA)'].includes(currentUser.role)) || 
+                      {((['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'QA', 'Quality Analyst (QA)', 'CEO', 'Delivery Head'].includes(currentUser.role)) || 
                         (currentUser.role === 'Client' && (col.sequence === 1 || col.title.toLowerCase().includes('started') || columns[0]?._id === col._id || columns[0]?.title === col.title))) && (
                         <button
                           onClick={() => {
@@ -1955,7 +1955,7 @@ export default function ProjectBoard({
                         >
                           Download
                         </a>
-                        {['BA', 'Business Analyst (BA)', 'PC', 'Project Coordinator (PC)', 'Sales', 'Sales Rep', 'PM', 'Project Manager (PM)'].includes(currentUser.role) && (
+                        {['BA', 'Business Analyst (BA)', 'PC', 'Project Coordinator (PC)', 'Sales', 'Sales Rep', 'PM', 'Project Manager (PM)', 'CEO', 'Delivery Head'].includes(currentUser.role) && (
                           <button
                             onClick={() => handleDeleteDoc(doc._id)}
                             style={styles.deleteFileBtn}
@@ -2015,7 +2015,7 @@ export default function ProjectBoard({
                           </a>
                         )}
 
-                        {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)'].includes(currentUser.role) && (
+                        {['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO', 'Delivery Head'].includes(currentUser.role) && (
                           <div style={{ display: 'flex', gap: '6px' }} onClick={(e) => e.stopPropagation()}>
                             <button 
                               type="button"

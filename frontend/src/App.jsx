@@ -7,6 +7,7 @@ import DeliveryHeadDashboard from './components/DeliveryHeadDashboard';
 import CreateProjectModal from './components/CreateProjectModal';
 import TicketDetailModal from './components/TicketDetailModal';
 import UserPerformanceModal from './components/UserPerformanceModal';
+import UserManagementModal from './components/UserManagementModal';
 import { API_BASE } from './config';
 
 export default function App() {
@@ -27,6 +28,7 @@ export default function App() {
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [activeProjectData, setActiveProjectData] = useState(null);
   const [showCreateProject, setShowCreateProject] = useState(false);
+  const [showUserManagement, setShowUserManagement] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState(null);
   const [projectToEdit, setProjectToEdit] = useState(null);
   const [inspectedUserForScorecard, setInspectedUserForScorecard] = useState(null);
@@ -230,6 +232,7 @@ export default function App() {
           currentUser={currentUser}
           onLogout={handleLogout}
           onTriggerCreateProject={() => setShowCreateProject(true)}
+          onTriggerUserManagement={() => setShowUserManagement(true)}
           onReorderProjects={handleReorderProjects}
           onOpenScorecard={setInspectedUserForScorecard}
         />
@@ -253,6 +256,7 @@ export default function App() {
             onSelectProject={setActiveProjectId}
             onOpenScorecard={setInspectedUserForScorecard}
             onTriggerCreateProject={() => setShowCreateProject(true)}
+            onTriggerUserManagement={() => setShowUserManagement(true)}
           />
         ) : ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)'].includes(currentUser.role) ? (
           <PMProjectsDashboard
@@ -260,6 +264,7 @@ export default function App() {
             currentUser={currentUser}
             onSelectProject={setActiveProjectId}
             onTriggerCreateProject={() => setShowCreateProject(true)}
+            onTriggerUserManagement={() => setShowUserManagement(true)}
             onEditProject={setProjectToEdit}
             onRefresh={triggerRefresh}
             onOpenScorecard={setInspectedUserForScorecard}
@@ -330,6 +335,15 @@ export default function App() {
           userEmail={inspectedUserForScorecard.email}
           userName={inspectedUserForScorecard.name}
           onClose={() => setInspectedUserForScorecard(null)}
+        />
+      )}
+
+      {/* USER MANAGEMENT & PROVISIONING MODAL (MASTER ADMIN ONLY) */}
+      {showUserManagement && (
+        <UserManagementModal
+          currentUser={currentUser}
+          onClose={() => setShowUserManagement(false)}
+          onUserCreated={triggerRefresh}
         />
       )}
     </div>

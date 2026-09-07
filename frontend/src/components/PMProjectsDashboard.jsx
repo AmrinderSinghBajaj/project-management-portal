@@ -23,6 +23,7 @@ export default function PMProjectsDashboard({
   onEditProject,
   onRefresh,
   onOpenScorecard,
+  onTriggerUserManagement,
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatusFilter, setSelectedStatusFilter] = useState('All');
@@ -126,7 +127,7 @@ export default function PMProjectsDashboard({
               {totalPendingSum.toLocaleString()}
             </span>
           </div>
-          {['PM', 'Project Manager (PM)', 'CEO'].includes(currentUser?.role) && (
+          {['PM', 'Project Manager (PM)', 'CEO', 'Delivery Head'].includes(currentUser?.role) && (
             <button 
               onClick={onTriggerCreateProject}
               style={styles.newProjectBtn}
@@ -614,6 +615,18 @@ const styles = {
     border: 'none',
     cursor: 'pointer',
     marginLeft: '8px',
+  },
+  adminUserBtn: {
+    padding: '7px 14px',
+    backgroundColor: '#1e3a8a',
+    color: '#ffffff',
+    borderRadius: '8px',
+    fontSize: '12px',
+    fontWeight: '600',
+    border: 'none',
+    cursor: 'pointer',
+    marginLeft: '6px',
+    boxShadow: '0 2px 8px rgba(30, 58, 138, 0.25)',
   },
   filterBar: {
     display: 'flex',

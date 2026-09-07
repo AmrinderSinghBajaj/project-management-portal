@@ -15,9 +15,11 @@ export default function Sidebar({
   onLogout, 
   onTriggerCreateProject,
   onReorderProjects,
-  onOpenScorecard
+  onOpenScorecard,
+  onTriggerUserManagement
 }) {
-  const isPriorityManager = ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)'].includes(currentUser?.role);
+  const isPriorityManager = ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'Delivery Head', 'CEO'].includes(currentUser?.role);
+  const isMasterAdmin = currentUser?.email?.toLowerCase() === 'amrinderpm@apptunix.com';
 
   const handleDragStart = (e, index) => {
     e.dataTransfer.setData('text/plain', index.toString());
@@ -51,6 +53,22 @@ export default function Sidebar({
         <img src="/logo_icon.png" alt="Apptunix" style={styles.brandLogo} />
         <div style={styles.brandText}>Apptunix</div>
       </div>
+
+      {/* Master Admin User Provisioning Button */}
+      {isMasterAdmin && (
+        <div style={{ padding: '0 16px 12px 16px' }}>
+          <button
+            type="button"
+            onClick={onTriggerUserManagement}
+            style={styles.adminUsersBtn}
+            className="sidebar-admin-btn"
+            title="Provision & manage team user credentials"
+          >
+            <span style={{ fontSize: '15px' }}>👥</span>
+            <span>Manage Team Users</span>
+          </button>
+        </div>
+      )}
 
       {/* Projects Navigation */}
       {currentUser?.role === 'Client' ? (
@@ -434,5 +452,21 @@ const styles = {
     cursor: 'pointer',
     flexShrink: 0,
     transition: 'var(--transition-smooth)',
+  },
+  adminUsersBtn: {
+    width: '100%',
+    padding: '10px 14px',
+    backgroundColor: '#1e3a8a',
+    color: '#ffffff',
+    border: 'none',
+    borderRadius: '10px',
+    fontSize: '13px',
+    fontWeight: '600',
+    display: 'flex',
+    alignItems: 'center',
+    gap: '8px',
+    cursor: 'pointer',
+    boxShadow: '0 4px 12px rgba(30, 58, 138, 0.2)',
+    transition: 'transform 0.15s ease, background-color 0.15s ease',
   },
 };

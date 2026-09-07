@@ -63,7 +63,7 @@ const getRoleBadgeStyle = (role) => {
   if (!role) return { bg: 'rgba(148, 163, 184, 0.1)', color: '#64748b' };
   
   const roleLower = role.toLowerCase();
-  if (roleLower.includes('ceo') || roleLower.includes('pm') || roleLower.includes('manager') || roleLower.includes('coordinator') || roleLower.includes('pc')) {
+  if (roleLower.includes('ceo') || roleLower.includes('delivery') || roleLower.includes('pm') || roleLower.includes('manager') || roleLower.includes('coordinator') || roleLower.includes('pc')) {
     return { bg: 'rgba(245, 158, 11, 0.1)', color: '#d97706' }; // Amber/Orange
   }
   if (roleLower.includes('developer') || roleLower.includes('designer') || roleLower.includes('frontend') || roleLower.includes('backend') || roleLower.includes('flutter') || roleLower.includes('android') || roleLower.includes('ios') || roleLower.includes('python')) {

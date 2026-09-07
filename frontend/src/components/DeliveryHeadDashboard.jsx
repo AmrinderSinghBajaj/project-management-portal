@@ -40,6 +40,7 @@ export default function DeliveryHeadDashboard({
   onSelectProject,
   onOpenScorecard,
   onTriggerCreateProject,
+  onTriggerUserManagement,
 }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -521,6 +522,17 @@ const styles = {
     borderRadius: '6px',
     cursor: 'pointer',
     boxShadow: '0 4px 10px rgba(30, 58, 138, 0.2)',
+  },
+  adminUserBtn: {
+    padding: '6px 14px',
+    fontSize: '11px',
+    fontWeight: '700',
+    color: '#ffffff',
+    backgroundColor: '#1e3a8a',
+    border: 'none',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    boxShadow: '0 4px 10px rgba(30, 58, 138, 0.25)',
   },
   kpiGrid: {
     display: 'grid',

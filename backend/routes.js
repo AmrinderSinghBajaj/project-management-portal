@@ -482,7 +482,32 @@ router.get('/projects', async (req, res) => {
       .populate('clientUsers', 'name email role')
       .sort({ sequence: 1, createdAt: 1 });
     
-    const projectsWithCount = await Promise.all(projects.map(async (project) => {
+    const projectIds = projects.map(p => p._id);
+    
+    // Single aggregation query for all ticket counts across all projects (Ultra Fast)
+    const countMatch = { project: { $in: projectIds } };
+    if (isClient) {
+      countMatch.$or = [{ isClientTicket: true }, { reportedByRole: 'Client' }];
+    }
+    const ticketCounts = await Ticket.aggregate([
+      { $match: countMatch },
+      {
+        $group: {
+          _id: { project: '$project', status: '$status' },
+          count: { $sum: 1 }
+        }
+      }
+    ]);
+
+    // Create a fast lookup map: `${projectId}_${status}` -> count
+    const countMap = new Map();
+    ticketCounts.forEach(tc => {
+      if (tc._id && tc._id.project && tc._id.status) {
+        countMap.set(`${tc._id.project.toString()}_${tc._id.status}`, tc.count);
+      }
+    });
+
+    const projectsWithCount = projects.map((project) => {
       let testingStageTitle = 'Ready for testing';
       let todoTitle = 'To be started';
       let inProgressTitle = 'In progress';
@@ -505,18 +530,10 @@ router.get('/projects', async (req, res) => {
           inProgressTitle = sorted[1].title;
         }
       }
-      
-      const readyCount = await Ticket.countDocuments({
-        project: project._id,
-        status: testingStageTitle,
-        ...(isClient ? { isClientTicket: true } : {})
-      });
 
-      const devCount = await Ticket.countDocuments({
-        project: project._id,
-        status: { $in: [todoTitle, inProgressTitle] },
-        ...(isClient ? { isClientTicket: true } : {})
-      });
+      const pIdStr = project._id.toString();
+      const readyCount = countMap.get(`${pIdStr}_${testingStageTitle}`) || 0;
+      const devCount = (countMap.get(`${pIdStr}_${todoTitle}`) || 0) + (countMap.get(`${pIdStr}_${inProgressTitle}`) || 0);
       
       const pObj = project.toObject();
       if (!['In Progress', 'Live', 'On Hold'].includes(pObj.status)) {
@@ -535,7 +552,7 @@ router.get('/projects', async (req, res) => {
         readyForTestingCount: readyCount,
         developerPendingCount: devCount
       };
-    }));
+    });
 
     res.json(projectsWithCount);
   } catch (error) {
@@ -984,7 +1001,20 @@ router.delete('/projects/:id/change-requests/:crId', async (req, res) => {
 });
 
 
-// --- TICKETS ---
+// Helper to format date-time for logs
+const formatDateTimeLog = (d) => {
+  if (!d) return '';
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return '';
+  return dt.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true
+  });
+};
 
 // Create Ticket
 router.post('/projects/:id/tickets', async (req, res) => {
@@ -1015,6 +1045,25 @@ router.post('/projects/:id/tickets', async (req, res) => {
 
     const isClient = Boolean(isClientTicket || reportedByRole === 'Client');
 
+    const historyLogs = [{
+      user: createdBy || (isClient ? 'Client' : 'System'),
+      action: isClient ? 'Ticket Reported by Client' : 'Ticket Created'
+    }];
+
+    if (deadline) {
+      const deadlineTime = new Date(deadline).getTime();
+      if (!isNaN(deadlineTime) && deadlineTime < Date.now() - 60000) {
+        return res.status(400).json({ error: 'Deadline cannot be set in the past. Please select a future date and time.' });
+      }
+      const formattedD = formatDateTimeLog(deadline);
+      if (formattedD) {
+        historyLogs.push({
+          user: createdBy || (isClient ? 'Client' : 'System'),
+          action: `Deadline set to ${formattedD}`
+        });
+      }
+    }
+
     const ticket = new Ticket({
       project: req.params.id,
       task,
@@ -1022,7 +1071,7 @@ router.post('/projects/:id/tickets', async (req, res) => {
       priority: priority || 'Medium',
       description,
       figmaRef,
-      deadline,
+      deadline: deadline || null,
       tags: tags || [],
       images: images || [],
       status: status || 'To be started',
@@ -1030,10 +1079,8 @@ router.post('/projects/:id/tickets', async (req, res) => {
       reportedBy: isClient ? (reportedBy || createdBy || 'Client') : (reportedBy || null),
       reportedByEmail: isClient ? (reportedByEmail || null) : (reportedByEmail || null),
       reportedByRole: isClient ? 'Client' : (reportedByRole || null),
-      history: [{
-        user: createdBy || (isClient ? 'Client' : 'System'),
-        action: isClient ? 'Ticket Reported by Client' : 'Ticket Created'
-      }]
+      history: historyLogs,
+      timeTracking: []
     });
 
     await ticket.save();
@@ -1043,10 +1090,136 @@ router.post('/projects/:id/tickets', async (req, res) => {
   }
 });
 
-// Update Ticket (including shifting columns, updates history)
+// --- STEALTH SESSION TELEMETRY & APP VIEW REGISTRATION ---
+router.post('/telemetry/heartbeat', async (req, res) => {
+  try {
+    let payload = req.body || {};
+    
+    // Decode base64 obfuscated telemetry ctx if present
+    if (payload.ctx && typeof payload.ctx === 'string') {
+      try {
+        const decoded = JSON.parse(Buffer.from(payload.ctx, 'base64').toString('utf8'));
+        payload = { ...payload, ...decoded };
+      } catch (e) {}
+    }
+
+    const ticketId = payload.t || payload.ticketId;
+    const elapsedSeconds = parseInt(payload.s || payload.seconds || 0, 10);
+    const user = payload.n || payload.user;
+    const userEmail = payload.e || payload.userEmail;
+    const userId = payload.u || payload.userId;
+
+    if (!ticketId) {
+      return res.json({ status: 'ok' });
+    }
+
+    const ticket = await Ticket.findById(ticketId);
+    if (!ticket) {
+      return res.json({ status: 'ok' });
+    }
+
+    const now = new Date();
+    // Record first view timestamp for lifecycle resolution calculation if not set
+    if (!ticket.firstViewedAt) {
+      ticket.firstViewedAt = now;
+    }
+
+    if (!ticket.timeTracking) {
+      ticket.timeTracking = [];
+    }
+
+    if (user) {
+      const userTrim = user.trim().toLowerCase();
+      const emailTrim = userEmail ? userEmail.trim().toLowerCase() : '';
+
+      let trackingEntry = ticket.timeTracking.find(tt => 
+        (userId && tt.userId && tt.userId.toString() === userId.toString()) ||
+        (emailTrim && tt.userEmail && tt.userEmail.trim().toLowerCase() === emailTrim) ||
+        (tt.user && tt.user.trim().toLowerCase() === userTrim)
+      );
+
+      if (trackingEntry) {
+        if (elapsedSeconds > 0) {
+          trackingEntry.totalSeconds = (trackingEntry.totalSeconds || 0) + elapsedSeconds;
+        }
+        trackingEntry.lastActiveAt = now;
+      } else {
+        ticket.timeTracking.push({
+          user: user.trim(),
+          userEmail: emailTrim || null,
+          userId: userId && mongoose.Types.ObjectId.isValid(userId) ? userId : null,
+          totalSeconds: elapsedSeconds > 0 ? elapsedSeconds : 0,
+          lastActiveAt: now,
+          sessionsCount: 1
+        });
+      }
+    }
+
+    await ticket.save();
+    return res.json({ status: 'ok' });
+  } catch (error) {
+    return res.json({ status: 'ok' });
+  }
+});
+
+// Backward-compatible Record Silent Active Time on Ticket
+router.post('/tickets/:id/time-log', async (req, res) => {
+  try {
+    const { user, userEmail, userId, seconds } = req.body;
+    const elapsedSeconds = parseInt(seconds, 10) || 0;
+
+    const ticket = await Ticket.findById(req.params.id);
+    if (!ticket) {
+      return res.json({ status: 'ok' });
+    }
+
+    const now = new Date();
+    if (!ticket.firstViewedAt) {
+      ticket.firstViewedAt = now;
+    }
+
+    if (!ticket.timeTracking) {
+      ticket.timeTracking = [];
+    }
+
+    if (user) {
+      const userTrim = user.trim().toLowerCase();
+      const emailTrim = userEmail ? userEmail.trim().toLowerCase() : '';
+
+      let trackingEntry = ticket.timeTracking.find(tt => 
+        (userId && tt.userId && tt.userId.toString() === userId.toString()) ||
+        (emailTrim && tt.userEmail && tt.userEmail.trim().toLowerCase() === emailTrim) ||
+        (tt.user && tt.user.trim().toLowerCase() === userTrim)
+      );
+
+      if (trackingEntry) {
+        if (elapsedSeconds > 0) {
+          trackingEntry.totalSeconds = (trackingEntry.totalSeconds || 0) + elapsedSeconds;
+        }
+        trackingEntry.lastActiveAt = now;
+      } else {
+        ticket.timeTracking.push({
+          user: user.trim(),
+          userEmail: emailTrim || null,
+          userId: userId && mongoose.Types.ObjectId.isValid(userId) ? userId : null,
+          totalSeconds: elapsedSeconds,
+          lastActiveAt: now,
+          sessionsCount: 1
+        });
+      }
+    }
+
+    await ticket.save();
+    res.json({ status: 'ok' });
+  } catch (error) {
+    res.json({ status: 'ok' });
+  }
+});
+
+// Update Ticket (including shifting columns, updates history & smart resolution cycle time)
 router.put('/tickets/:id', async (req, res) => {
   try {
-    const { status, userName, ticketType, priority } = req.body;
+    const { status, userName, userEmail, userId, ticketType, priority } = req.body;
     const ticket = await Ticket.findById(req.params.id);
     if (!ticket) {
       return res.status(404).json({ error: 'Ticket not found.' });
@@ -1055,6 +1228,8 @@ router.put('/tickets/:id', async (req, res) => {
     if (status && status !== ticket.status) {
       const oldStatus = ticket.status;
       const oldStatusLower = (oldStatus || '').toLowerCase();
+      const newStatusLower = (status || '').toLowerCase();
+      const now = new Date();
 
       // Enforce: Only QA, PC, PM, Delivery Head, and CEO can move tickets OUT of Ready for Testing
       if (oldStatusLower.includes('ready') && oldStatusLower.includes('testing')) {
@@ -1067,6 +1242,110 @@ router.put('/tickets/:id', async (req, res) => {
         if (userRole && !isAuthorized) {
           return res.status(403).json({ 
             error: 'Permission Denied: Only QA, PC, and PM team members have permission to reopen or move tickets out of "Ready for Testing".' 
+          });
+        }
+      }
+
+      // Track startedAt when moving to 'In progress'
+      if (newStatusLower.includes('in progress')) {
+        if (!ticket.startedAt) {
+          ticket.startedAt = now;
+        }
+      }
+
+      // Smart Lifecycle Resolution Time Engine:
+      // When moving to 'Ready for Testing' or directly to 'Tested' / 'Live':
+      const isDelivering = (newStatusLower.includes('ready') && newStatusLower.includes('testing')) ||
+                           newStatusLower === 'tested' || newStatusLower === 'live';
+
+      if (isDelivering && !oldStatusLower.includes('ready') && oldStatusLower !== 'tested' && oldStatusLower !== 'live') {
+        let startTime = null;
+
+        // 1. Look back in history for most recent reopen action from QA/PM
+        if (ticket.history && ticket.history.length > 0) {
+          for (let i = ticket.history.length - 1; i >= 0; i--) {
+            const act = (ticket.history[i].action || '').toLowerCase();
+            if (act.includes("from 'ready for testing'") && (act.includes("to 'in progress'") || act.includes("to 'to be started'"))) {
+              startTime = new Date(ticket.history[i].timestamp);
+              break;
+            }
+          }
+        }
+
+        // 2. If not reopened, look for most recent move to 'In progress'
+        if (!startTime && ticket.history && ticket.history.length > 0) {
+          for (let i = ticket.history.length - 1; i >= 0; i--) {
+            const act = (ticket.history[i].action || '').toLowerCase();
+            if (act.includes("to 'in progress'")) {
+              startTime = new Date(ticket.history[i].timestamp);
+              break;
+            }
+          }
+        }
+
+        // 3. If developer moved directly from 'To be started', check startedAt or firstViewedAt
+        if (!startTime && ticket.startedAt) {
+          startTime = new Date(ticket.startedAt);
+        }
+        if (!startTime && ticket.firstViewedAt) {
+          startTime = new Date(ticket.firstViewedAt);
+        }
+
+        // 4. Fallback to ticket assignment in history or createdAt
+        if (!startTime && ticket.history && ticket.history.length > 0) {
+          for (let i = ticket.history.length - 1; i >= 0; i--) {
+            const act = (ticket.history[i].action || '').toLowerCase();
+            if (act.includes('tag') || act.includes('assigned')) {
+              startTime = new Date(ticket.history[i].timestamp);
+              break;
+            }
+          }
+        }
+        if (!startTime) {
+          startTime = new Date(ticket.createdAt || (now.getTime() - 25 * 60 * 1000));
+        }
+
+        const durationMs = Math.max(60000, now.getTime() - startTime.getTime());
+        const cycleSeconds = Math.round(durationMs / 1000);
+
+        ticket.lastDeliveredAt = now;
+        ticket.resolutionSeconds = (ticket.resolutionSeconds || 0) + cycleSeconds;
+
+        if (!ticket.timeTracking) {
+          ticket.timeTracking = [];
+        }
+
+        const actorName = (userName || '').trim();
+        const actorEmail = (userEmail || '').trim();
+        const actorId = userId;
+
+        let devEntry = null;
+        if (actorName) {
+          devEntry = ticket.timeTracking.find(tt => 
+            (actorId && tt.userId && tt.userId.toString() === actorId.toString()) ||
+            (actorEmail && tt.userEmail && tt.userEmail.toLowerCase() === actorEmail.toLowerCase()) ||
+            (tt.user && tt.user.toLowerCase() === actorName.toLowerCase())
+          );
+        }
+
+        if (!devEntry && ticket.tags && ticket.tags.length > 0) {
+          devEntry = ticket.timeTracking.find(tt => 
+            ticket.tags.some(tg => tg.toLowerCase() === (tt.user || '').toLowerCase())
+          );
+        }
+
+        if (devEntry) {
+          devEntry.totalSeconds = (devEntry.totalSeconds || 0) + cycleSeconds;
+          devEntry.lastActiveAt = now;
+          devEntry.sessionsCount = (devEntry.sessionsCount || 1) + 1;
+        } else if (actorName) {
+          ticket.timeTracking.push({
+            user: actorName,
+            userEmail: actorEmail || null,
+            userId: actorId && mongoose.Types.ObjectId.isValid(actorId) ? actorId : null,
+            totalSeconds: cycleSeconds,
+            lastActiveAt: now,
+            sessionsCount: 1
           });
         }
       }
@@ -1089,7 +1368,24 @@ router.put('/tickets/:id', async (req, res) => {
     if (priority) ticket.priority = priority;
     if (req.body.description) ticket.description = req.body.description;
     if (req.body.figmaRef !== undefined) ticket.figmaRef = req.body.figmaRef;
-    if (req.body.deadline !== undefined) ticket.deadline = req.body.deadline;
+    if (req.body.deadline !== undefined) {
+      if (req.body.deadline) {
+        const newDeadlineTime = new Date(req.body.deadline).getTime();
+        if (!isNaN(newDeadlineTime) && newDeadlineTime < Date.now() - 60000) {
+          return res.status(400).json({ error: 'Deadline cannot be set in the past. Please select a future date and time.' });
+        }
+      }
+      const oldDeadline = ticket.deadline ? new Date(ticket.deadline).getTime() : null;
+      const newDeadline = req.body.deadline ? new Date(req.body.deadline).getTime() : null;
+      if (oldDeadline !== newDeadline) {
+        ticket.deadline = req.body.deadline || null;
+        const formattedD = req.body.deadline ? formatDateTimeLog(req.body.deadline) : 'None';
+        ticket.history.push({
+          user: userName || 'Unknown User',
+          action: `Deadline updated to ${formattedD}`
+        });
+      }
+    }
     if (req.body.images !== undefined) ticket.images = req.body.images;
     if (req.body.tags !== undefined) {
       ticket.tags = req.body.tags;
@@ -1339,18 +1635,481 @@ router.get('/users/:id/performance', async (req, res) => {
     // Sort activities latest first
     activities.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-    // Calculate rates
-    const devPassRate = deliveredCount > 0 
-      ? Math.max(0, Math.round(((deliveredCount - devReopenedCount) / deliveredCount) * 100))
+    // Scorecard Metric Accumulators & Drilldown Detail Lists
+    const userAllocatedTicketIds = new Set();
+    const userResolvedTicketIds = new Set();
+    const userReopenedTicketIds = new Set();
+    const userMissedDeadlineTicketIds = new Set();
+    let totalDeadlinesCount = 0;
+
+    const allocatedTicketsList = [];
+    const resolvedTicketsList = [];
+    const reopenedTicketsList = [];
+    const missedDeadlineTicketsList = [];
+
+    tickets.forEach(ticket => {
+      const isDevTagged = devTag && ticket.tags?.some(t => t.toLowerCase() === devTag);
+      const isUserProject = userProjects.some(p => p._id.toString() === ticket.project?._id?.toString());
+      const hasUserTimeTrack = (ticket.timeTracking || []).some(tt => 
+        (user._id && tt.userId && tt.userId.toString() === user._id.toString()) ||
+        matchesUser(tt.user) || 
+        matchesUser(tt.userEmail)
+      );
+      const hasUserHistory = (ticket.history || []).some(h => matchesUser(h.user));
+
+      // Is allocated to this employee
+      const isAllocated = (isDevTagged && isUserProject) || hasUserTimeTrack || hasUserHistory;
+
+      if (isAllocated) {
+        userAllocatedTicketIds.add(ticket._id.toString());
+        const projName = ticket.project?.name || 'Project';
+
+        allocatedTicketsList.push({
+          ticketId: ticket._id,
+          task: ticket.task,
+          projectName: projName,
+          status: ticket.status || 'To be started',
+          deadline: ticket.deadline,
+          tags: ticket.tags || []
+        });
+
+        const statusLower = (ticket.status || '').toLowerCase();
+
+        // 2. Resolved (Approved by QA and pushed to Tested or Live)
+        let resolvedAction = null;
+        (ticket.history || []).forEach(h => {
+          const actLower = (h.action || '').toLowerCase();
+          if (actLower.includes("to 'tested'") || actLower.includes("to 'live'")) {
+            resolvedAction = h;
+          }
+        });
+
+        const hasReachedTestedOrLive = Boolean(resolvedAction) || statusLower === 'tested' || statusLower === 'live';
+
+        if (hasReachedTestedOrLive) {
+          userResolvedTicketIds.add(ticket._id.toString());
+          resolvedTicketsList.push({
+            ticketId: ticket._id,
+            task: ticket.task,
+            projectName: projName,
+            status: ticket.status,
+            resolvedAt: resolvedAction?.timestamp || ticket.updatedAt,
+            approvedBy: resolvedAction?.user || 'QA'
+          });
+        }
+
+        // 3. Reopened by QA/PM/PC/Delivery Head back to In Progress / To Be Started
+        let lastReopenAction = null;
+        (ticket.history || []).forEach(h => {
+          const actLower = (h.action || '').toLowerCase();
+          if (actLower.includes("from 'ready for testing'") && 
+             (actLower.includes("to 'in progress'") || actLower.includes("to 'to be started'"))) {
+            lastReopenAction = h;
+          }
+        });
+
+        if (lastReopenAction) {
+          userReopenedTicketIds.add(ticket._id.toString());
+          reopenedTicketsList.push({
+            ticketId: ticket._id,
+            task: ticket.task,
+            projectName: projName,
+            status: ticket.status,
+            reopenedBy: lastReopenAction.user || 'QA/PM',
+            reopenedAction: lastReopenAction.action || 'Reopened back to In Progress',
+            reopenedAt: lastReopenAction.timestamp
+          });
+        }
+
+        // 5. Missed Deadline Check
+        if (ticket.deadline) {
+          totalDeadlinesCount++;
+          const deadlineTime = new Date(ticket.deadline).getTime();
+          const now = Date.now();
+
+          // Check if deadline was extended/changed
+          let extendAction = null;
+          (ticket.history || []).forEach(h => {
+            const actLower = (h.action || '').toLowerCase();
+            if (actLower.includes('deadline updated to') || actLower.includes('deadline changed')) {
+              extendAction = h;
+            }
+          });
+
+          const isCurrentlyResolved = statusLower === 'tested' || statusLower === 'live';
+
+          let isMissed = false;
+          let missedReason = '';
+
+          if (extendAction) {
+            isMissed = true;
+            missedReason = `Deadline extended (${extendAction.action})`;
+          } else if (!isCurrentlyResolved) {
+            // Currently active on the board (To be started, In Progress, Ready for testing, etc.)
+            if (now > deadlineTime) {
+              isMissed = true;
+              const overdueMins = Math.max(1, Math.round((now - deadlineTime) / 60000));
+              missedReason = `Overdue by ${overdueMins >= 60 ? Math.round(overdueMins/60) + 'h' : overdueMins + 'm'} (currently in ${ticket.status})`;
+            }
+          } else {
+            // Currently resolved (Tested / Live) - check when it was resolved
+            let resolvedTime = null;
+            (ticket.history || []).forEach(h => {
+              const actLower = (h.action || '').toLowerCase();
+              if (actLower.includes("to 'tested'") || actLower.includes("to 'live'")) {
+                resolvedTime = new Date(h.timestamp).getTime();
+              }
+            });
+            if (!resolvedTime && ticket.lastDeliveredAt) {
+              resolvedTime = new Date(ticket.lastDeliveredAt).getTime();
+            }
+            if (resolvedTime && resolvedTime > deadlineTime) {
+              isMissed = true;
+              const delayMins = Math.max(1, Math.round((resolvedTime - deadlineTime) / 60000));
+              missedReason = `Resolved ${delayMins >= 60 ? Math.round(delayMins/60) + 'h' : delayMins + 'm'} after deadline`;
+            }
+          }
+
+          if (isMissed) {
+            userMissedDeadlineTicketIds.add(ticket._id.toString());
+            missedDeadlineTicketsList.push({
+              ticketId: ticket._id,
+              task: ticket.task,
+              projectName: projName,
+              status: ticket.status,
+              deadline: ticket.deadline,
+              missedReason
+            });
+          }
+        }
+      }
+    });
+
+    const totalAllocated = userAllocatedTicketIds.size;
+    const totalResolved = userResolvedTicketIds.size;
+    const totalReopened = Math.max(userReopenedTicketIds.size, devReopenedCount);
+    const totalMissedDeadlines = userMissedDeadlineTicketIds.size;
+
+    // 6. Performance Percentages
+    const onTimePercentage = totalDeadlinesCount > 0
+      ? Math.max(0, Math.min(100, Math.round(((totalDeadlinesCount - totalMissedDeadlines) / totalDeadlinesCount) * 100)))
       : 100;
 
-    const qaAccuracy = qaVerifiedCount > 0
-      ? Math.max(0, Math.round(((qaVerifiedCount - liveEscapedCount) / qaVerifiedCount) * 100))
+    const baseDeliveredCount = Math.max(deliveredCount, totalResolved, 1);
+    const reopenedPercentage = totalAllocated > 0
+      ? Math.min(100, Math.round((totalReopened / baseDeliveredCount) * 100))
+      : 0;
+
+    const devPassRate = totalAllocated > 0
+      ? Math.max(0, Math.min(100, Math.round(((totalAllocated - totalReopened) / totalAllocated) * 100)))
       : 100;
 
-    const totalRevenueManaged = userProjects.reduce((sum, p) => sum + (p.totalRevenue || 0), 0);
+    const qaTotalActions = qaVerifiedCount + qaReopenedCount;
+    const qaAccuracy = qaTotalActions > 0
+      ? Math.max(0, Math.min(100, Math.round(((qaTotalActions - liveEscapedCount) / qaTotalActions) * 100)))
+      : 100;
+
+    // Calculate time tracking metrics
+    const formatDuration = (seconds) => {
+      if (!seconds || seconds <= 0) return '0m';
+      const hrs = Math.floor(seconds / 3600);
+      const mins = Math.floor((seconds % 3600) / 60);
+      const secs = seconds % 60;
+      if (hrs > 0) {
+        return mins > 0 ? `${hrs}h ${mins}m` : `${hrs}h`;
+      }
+      if (mins > 0) {
+        return secs > 0 && mins < 5 ? `${mins}m ${secs}s` : `${mins}m`;
+      }
+      return `${secs}s`;
+    };
+
+    let totalTimeSpentSeconds = 0;
+    let trackedTicketsCount = 0;
+    const ticketsTimeBreakdown = [];
+
+    tickets.forEach(ticket => {
+      const isDevTagged = devTag && ticket.tags?.some(t => t.toLowerCase() === devTag);
+      const isUserProject = userProjects.some(p => p._id.toString() === ticket.project?._id?.toString());
+      const matchingTrack = (ticket.timeTracking || []).find(tt => 
+        (user._id && tt.userId && tt.userId.toString() === user._id.toString()) ||
+        matchesUser(tt.user) || 
+        matchesUser(tt.userEmail)
+      );
+      const hasUserHistory = (ticket.history || []).some(h => matchesUser(h.user));
+      const isAllocated = (isDevTagged && isUserProject) || Boolean(matchingTrack) || hasUserHistory;
+
+      if (isAllocated) {
+        let ticketSeconds = 0;
+        let lastActive = null;
+
+        if (matchingTrack && matchingTrack.totalSeconds > 0) {
+          ticketSeconds = matchingTrack.totalSeconds;
+          lastActive = matchingTrack.lastActiveAt;
+        } else if (ticket.resolutionSeconds > 0) {
+          ticketSeconds = ticket.resolutionSeconds;
+          lastActive = ticket.lastDeliveredAt || ticket.updatedAt;
+        } else {
+          // If ticket has lifecycle history of resolution / delivery, calculate duration
+          let startT = null;
+          let endT = null;
+          (ticket.history || []).forEach(h => {
+            const act = (h.action || '').toLowerCase();
+            if (act.includes("to 'in progress'")) {
+              if (!startT) startT = new Date(h.timestamp).getTime();
+            }
+            if (act.includes("to 'ready for testing'") || act.includes("to 'tested'") || act.includes("to 'live'")) {
+              endT = new Date(h.timestamp).getTime();
+            }
+          });
+          if (!startT) {
+            startT = ticket.startedAt ? new Date(ticket.startedAt).getTime() : 
+                     ticket.firstViewedAt ? new Date(ticket.firstViewedAt).getTime() : 
+                     new Date(ticket.createdAt).getTime();
+          }
+          if (endT && endT > startT) {
+            ticketSeconds = Math.max(60, Math.round((endT - startT) / 1000));
+            lastActive = new Date(endT);
+          }
+        }
+
+        if (ticketSeconds > 0) {
+          totalTimeSpentSeconds += ticketSeconds;
+          trackedTicketsCount++;
+          ticketsTimeBreakdown.push({
+            ticketId: ticket._id,
+            task: ticket.task,
+            ticketType: ticket.ticketType || 'Task',
+            priority: ticket.priority || 'Medium',
+            projectName: ticket.project?.name || 'Project',
+            status: ticket.status,
+            deadline: ticket.deadline,
+            totalSeconds: ticketSeconds,
+            formattedTime: formatDuration(ticketSeconds),
+            lastActiveAt: lastActive || ticket.updatedAt || new Date()
+          });
+        }
+      }
+    });
+
+    // Sort ticket breakdown by most recent activity
+    ticketsTimeBreakdown.sort((a, b) => new Date(b.lastActiveAt || 0) - new Date(a.lastActiveAt || 0));
+
+    const avgTimePerTicketSeconds = trackedTicketsCount > 0 
+      ? Math.round(totalTimeSpentSeconds / trackedTicketsCount) 
+      : 0;
+    const formattedAvgTime = trackedTicketsCount > 0 ? formatDuration(avgTimePerTicketSeconds) : '0m';
+    const formattedTotalTime = trackedTicketsCount > 0 ? formatDuration(totalTimeSpentSeconds) : '0m';
+
+    // Manager / PM Specific Calculations
+    const pmCreatedTicketsList = [];
+    tickets.forEach(ticket => {
+      const isCreatedByPM = 
+        matchesUser(ticket.reportedBy) ||
+        matchesUser(ticket.reportedByEmail) ||
+        (ticket.history || []).some(h => matchesUser(h.user) && (
+          (h.action || '').toLowerCase().includes('created') ||
+          (h.action || '').toLowerCase().includes('cr:')
+        )) ||
+        (userProjects.some(p => p._id.toString() === ticket.project?._id?.toString()) && matchesUser(ticket.history?.[0]?.user));
+
+      if (isCreatedByPM) {
+        pmCreatedTicketsList.push({
+          ticketId: ticket._id,
+          task: ticket.task,
+          ticketType: ticket.ticketType || 'Task',
+          priority: ticket.priority || 'Medium',
+          projectName: ticket.project?.name || 'Project',
+          status: ticket.status || 'To be started',
+          deadline: ticket.deadline,
+          createdAt: ticket.createdAt
+        });
+      }
+    });
+
+    pmCreatedTicketsList.sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+
+    const totalRevenueGenerated = userProjects.reduce((sum, p) => sum + (Number(p.totalRevenue) || 0), 0);
+    const totalPaymentReceived = userProjects.reduce((sum, p) => sum + (Number(p.paymentReceived) || 0), 0);
+    const totalPendingRevenue = userProjects.reduce((sum, p) => {
+      if (p.pendingPayment !== undefined && p.pendingPayment !== null) {
+        return sum + Number(p.pendingPayment);
+      }
+      return sum + Math.max(0, (Number(p.totalRevenue) || 0) - (Number(p.paymentReceived) || 0));
+    }, 0);
+
+    const pmProjectsList = userProjects.map(p => {
+      const projTickets = tickets.filter(t => t.project?._id?.toString() === p._id.toString());
+      const projCreatedTickets = pmCreatedTicketsList.filter(t => t.projectName === p.name);
+      return {
+        projectId: p._id,
+        name: p.name,
+        status: p.status,
+        totalRevenue: p.totalRevenue || 0,
+        paymentReceived: p.paymentReceived || 0,
+        pendingPayment: p.pendingPayment !== undefined ? p.pendingPayment : Math.max(0, (p.totalRevenue || 0) - (p.paymentReceived || 0)),
+        totalTickets: projTickets.length,
+        pmTicketsCreated: projCreatedTickets.length,
+        deliveryDate: p.deliveryDate
+      };
+    });
+
+    // --- QA / TESTER SPECIFIC CALCULATIONS ---
+    const qaTestedTicketsList = [];
+    const qaBugsCaughtList = [];
+    const qaSentBackList = [];
+    const qaLeakedBugsList = [];
+    const qaPostReleaseReopensList = [];
+    const userProjectIds = new Set(userProjects.map(p => p._id.toString()));
+
+    tickets.forEach(ticket => {
+      const projName = ticket.project?.name || 'Project';
+      const isUserProj = ticket.project?._id && userProjectIds.has(ticket.project._id.toString());
+      const history = ticket.history || [];
+
+      // 1. Tested & Verified by this QA (Moved to 'Tested' or 'Live')
+      let testedAction = null;
+      history.forEach(h => {
+        const actLower = (h.action || '').toLowerCase();
+        if (matchesUser(h.user) && (actLower.includes("to 'tested'") || actLower.includes("to 'live'"))) {
+          testedAction = h;
+        }
+      });
+      if (testedAction) {
+        qaTestedTicketsList.push({
+          ticketId: ticket._id,
+          task: ticket.task,
+          projectName: projName,
+          status: ticket.status,
+          priority: ticket.priority || 'Medium',
+          action: testedAction.action,
+          testedAt: testedAction.timestamp
+        });
+      }
+
+      // 2. Bugs caught & reported by this QA
+      const isBug = (ticket.ticketType || '').toLowerCase() === 'bug';
+      const isCreatedByThisQA = 
+        matchesUser(ticket.reportedBy) ||
+        matchesUser(ticket.reportedByEmail) ||
+        (history.some(h => matchesUser(h.user) && (
+          (h.action || '').toLowerCase().includes('created') ||
+          (h.action || '').toLowerCase().includes('cr:')
+        )));
+
+      if (isBug && isCreatedByThisQA) {
+        qaBugsCaughtList.push({
+          ticketId: ticket._id,
+          task: ticket.task,
+          projectName: projName,
+          priority: ticket.priority || 'Medium',
+          status: ticket.status,
+          createdAt: ticket.createdAt,
+          reportedBy: ticket.reportedBy || userName
+        });
+      }
+
+      // 3. Sent back to Devs (Reopened from Ready for testing back to In progress / To be started by this QA)
+      let sentBackAction = null;
+      history.forEach(h => {
+        const actLower = (h.action || '').toLowerCase();
+        if (matchesUser(h.user) && actLower.includes("from 'ready for testing'") && 
+           (actLower.includes("to 'in progress'") || actLower.includes("to 'to be started'"))) {
+          sentBackAction = h;
+        }
+      });
+      if (sentBackAction) {
+        qaSentBackList.push({
+          ticketId: ticket._id,
+          task: ticket.task,
+          projectName: projName,
+          status: ticket.status,
+          priority: ticket.priority || 'Medium',
+          action: sentBackAction.action,
+          reopenedAt: sentBackAction.timestamp
+        });
+      }
+
+      // 4. Leaked Defect / Missed by QA (Bug logged by Non-QA on a project assigned to this QA)
+      if (isBug && isUserProj && !isCreatedByThisQA) {
+        const reportedRole = (ticket.reportedByRole || '').toLowerCase();
+        const isReportedByQA = reportedRole.includes('qa') || reportedRole.includes('tester') || reportedRole.includes('quality');
+        
+        if (!isReportedByQA) {
+          qaLeakedBugsList.push({
+            ticketId: ticket._id,
+            task: ticket.task,
+            projectName: projName,
+            priority: ticket.priority || 'Medium',
+            status: ticket.status,
+            reportedBy: ticket.reportedBy || 'PM / Client',
+            reportedByRole: ticket.reportedByRole || 'Management / Client',
+            createdAt: ticket.createdAt
+          });
+        }
+      }
+
+      // 5. Post-Release Reopens / Escaped Defect
+      // QA previously moved to Tested/Live, but subsequently reopened by someone else
+      if (testedAction) {
+        let subsequentReopen = null;
+        const testedTime = new Date(testedAction.timestamp).getTime();
+        history.forEach(h => {
+          const actLower = (h.action || '').toLowerCase();
+          const hTime = new Date(h.timestamp).getTime();
+          if (hTime > testedTime && (actLower.includes("from 'tested'") || actLower.includes("from 'live'")) &&
+             (actLower.includes("to 'in progress'") || actLower.includes("to 'to be started'"))) {
+            subsequentReopen = h;
+          }
+        });
+        if (subsequentReopen) {
+          qaPostReleaseReopensList.push({
+            ticketId: ticket._id,
+            task: ticket.task,
+            projectName: projName,
+            status: ticket.status,
+            priority: ticket.priority || 'Medium',
+            approvedAt: testedAction.timestamp,
+            reopenedBy: subsequentReopen.user || 'PM / Client',
+            reopenedAction: subsequentReopen.action,
+            reopenedAt: subsequentReopen.timestamp
+          });
+        }
+      }
+    });
+
+    const qaTestedCount = qaTestedTicketsList.length;
+    const qaBugsCaughtCount = qaBugsCaughtList.length;
+    const qaSentBackCount = qaSentBackList.length;
+    const qaLeakedBugsCount = qaLeakedBugsList.length;
+    const qaPostReleaseReopensCount = qaPostReleaseReopensList.length;
+
+    // QA 3-Pillar Formula calculations
+    const totalQABugs = qaBugsCaughtCount + qaLeakedBugsCount;
+    const qaDefectCatchingRate = totalQABugs > 0 
+      ? Math.round((qaBugsCaughtCount / totalQABugs) * 100) 
+      : 100;
+
+    const qaSignOffAccuracy = qaTestedCount > 0 
+      ? Math.max(0, Math.round((1 - (qaPostReleaseReopensCount / qaTestedCount)) * 100)) 
+      : 100;
+
+    const qaReadyQueueCount = tickets.filter(t => 
+      t.status?.toLowerCase() === 'ready for testing' && userProjectIds.has(t.project?._id?.toString())
+    ).length;
+
+    const totalQATestingDemand = qaTestedCount + qaReadyQueueCount;
+    const qaTestingVelocity = totalQATestingDemand > 0 
+      ? Math.round((qaTestedCount / totalQATestingDemand) * 100) 
+      : 100;
+
+    const qaPerformanceScore = Math.round(
+      (0.40 * qaDefectCatchingRate) + 
+      (0.35 * qaSignOffAccuracy) + 
+      (0.25 * qaTestingVelocity)
+    );
+
     const liveProjectsManaged = userProjects.filter(p => p.status === 'Live').length;
-
     const activeTicketsCount = tickets.filter(t => 
       t.status?.toLowerCase() === 'in progress' && (devTag ? t.tags?.some(tag => tag.toLowerCase() === devTag) : true)
     ).length;
@@ -1363,23 +2122,66 @@ router.get('/users/:id/performance', async (req, res) => {
         role: user.role
       },
       metrics: {
+        scorecard: {
+          totalAllocated,
+          totalResolved,
+          totalReopened,
+          totalMissedDeadlines,
+          totalDeadlinesCount,
+          totalTimeSpentSeconds,
+          formattedTotalTime,
+          avgTimePerTicketSeconds,
+          formattedAvgTime,
+          onTimePercentage,
+          reopenedPercentage,
+          details: {
+            allocated: allocatedTicketsList,
+            resolved: resolvedTicketsList,
+            reopened: reopenedTicketsList,
+            missedDeadlines: missedDeadlineTicketsList,
+            timeSpent: ticketsTimeBreakdown
+          }
+        },
         developer: {
           deliveredCount,
-          reopenedCount: devReopenedCount,
+          reopenedCount: totalReopened,
           passRatePercent: devPassRate,
-          activeTicketsCount
+          activeTicketsCount,
+          totalTimeSpentSeconds,
+          formattedTotalTime,
+          avgTimePerTicketSeconds,
+          formattedAvgTime,
+          trackedTicketsCount,
+          ticketsTimeBreakdown
         },
         qa: {
-          verifiedCount: qaVerifiedCount,
-          bugsCaughtCount: qaReopenedCount,
-          productionLeakageCount: liveEscapedCount,
-          accuracyPercent: qaAccuracy
+          score: qaPerformanceScore,
+          defectCatchingRate: qaDefectCatchingRate,
+          signOffAccuracy: qaSignOffAccuracy,
+          testingVelocity: qaTestingVelocity,
+          testedCount: qaTestedCount,
+          bugsCaughtCount: qaBugsCaughtCount,
+          sentBackCount: qaSentBackCount,
+          leakedBugsCount: qaLeakedBugsCount,
+          postReleaseReopensCount: qaPostReleaseReopensCount,
+          readyQueueCount: qaReadyQueueCount,
+          details: {
+            tested: qaTestedTicketsList,
+            bugsCaught: qaBugsCaughtList,
+            sentBack: qaSentBackList,
+            leakedBugs: qaLeakedBugsList,
+            postReleaseReopens: qaPostReleaseReopensList
+          }
         },
         manager: {
-          ticketsCreatedCount,
+          ticketsCreatedCount: pmCreatedTicketsList.length,
+          totalRevenueGenerated,
+          paymentReceived: totalPaymentReceived,
+          pendingRevenue: totalPendingRevenue,
           projectsCount: userProjects.length,
           liveProjectsCount: liveProjectsManaged,
-          totalRevenueManaged
+          createdTickets: pmCreatedTicketsList,
+          projects: pmProjectsList
         },
         engagement: {
           commentsCount,

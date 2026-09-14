@@ -98,12 +98,15 @@ export default function DeliveryHeadDashboard({
   });
 
   const filteredTeamMembers = (data?.teamMembersMatrix || []).filter(member => {
+    const r = (member.role || '').toLowerCase();
+    // Exclude Delivery Head and CEO from team performance reports
+    if (r.includes('delivery head') || r.includes('ceo')) return false;
+
     const matchesSearch = member.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
       member.role?.toLowerCase().includes(searchQuery.toLowerCase());
     
     if (selectedDeptFilter === 'All') return matchesSearch;
-    const r = (member.role || '').toLowerCase();
     const matchesDept = selectedDeptFilter === 'QA' ? r.includes('qa') || r.includes('quality') || r.includes('tester')
       : selectedDeptFilter === 'PM' ? r.includes('pm') || r.includes('pc') || r.includes('manager') || r.includes('coordinator')
       : selectedDeptFilter === 'Android' ? r.includes('android')

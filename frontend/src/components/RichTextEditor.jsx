@@ -17,10 +17,9 @@ export function getWordCountFromHtml(html) {
  */
 export function sanitizeRichHtml(html) {
   if (!html) return '';
-  // If text is legacy markdown (e.g. **bold**, *italic*, [red]...[/red], URLs), convert to HTML
   let content = html;
-  if (!content.includes('<p>') && !content.includes('<div>') && !content.includes('<ul>') && !content.includes('<span>') && !content.includes('<b>')) {
-    // Convert legacy tokens
+  if (!content.includes('<p>') && !content.includes('<div>') && !content.includes('<ul>') && !content.includes('<ol>') && !content.includes('<span>') && !content.includes('<b>') && !content.includes('<h1>') && !content.includes('<h2>')) {
+    // Convert legacy markdown tokens
     content = content
       .replace(/\[red\]([\s\S]*?)\[\/red\]/gi, '<span style="color: #dc2626; font-weight: 600;">$1</span>')
       .replace(/\[blue\]([\s\S]*?)\[\/blue\]/gi, '<span style="color: #2563eb; font-weight: 600;">$1</span>')
@@ -60,8 +59,30 @@ export function RichTextRenderer({ text, style = {} }) {
   );
 }
 
+// MS Word style standard palette colors
+const FONT_COLORS = [
+  { label: 'Automatic (Dark)', color: '#0f172a' },
+  { label: 'Red', color: '#dc2626' },
+  { label: 'Blue', color: '#2563eb' },
+  { label: 'Green', color: '#16a34a' },
+  { label: 'Orange', color: '#ea580c' },
+  { label: 'Purple', color: '#7c3aed' },
+  { label: 'Pink', color: '#db2777' },
+  { label: 'Amber', color: '#d97706' },
+  { label: 'Gray', color: '#64748b' }
+];
+
+const HIGHLIGHT_COLORS = [
+  { label: 'No Color', color: 'transparent', preview: '#ffffff', border: '#e2e8f0' },
+  { label: 'Yellow', color: '#fef08a', preview: '#fef08a' },
+  { label: 'Green', color: '#bbf7d0', preview: '#bbf7d0' },
+  { label: 'Cyan / Blue', color: '#bfdbfe', preview: '#bfdbfe' },
+  { label: 'Pink', color: '#fbcfe8', preview: '#fbcfe8' },
+  { label: 'Orange', color: '#fed7aa', preview: '#fed7aa' }
+];
+
 /**
- * Full WYSIWYG Editor with Live Toggling, Selection Formatting, and Direct Typing Support
+ * Microsoft Word style Professional WYSIWYG Editor
  */
 export default function RichTextEditorInput({
   value = '',
@@ -72,23 +93,50 @@ export default function RichTextEditorInput({
   maxWords = 400
 }) {
   const editorRef = useRef(null);
+  const colorMenuRef = useRef(null);
+  const highlightMenuRef = useRef(null);
+
   const [activeFormats, setActiveFormats] = useState({
     bold: false,
     italic: false,
     underline: false,
+    strike: false,
     bullet: false,
-    color: null
+    ordered: false,
+    heading: 'p',
+    color: '#0f172a',
+    highlight: 'transparent'
   });
 
-  // Keep editor content in sync when value changes externally (e.g. initial load or reset)
+  const [isColorOpen, setIsColorOpen] = useState(false);
+  const [isHighlightOpen, setIsHighlightOpen] = useState(false);
+
+  // Keep editor content in sync when value changes externally
   useEffect(() => {
     if (editorRef.current && editorRef.current.innerHTML !== value) {
-      // Only set if not currently focused or if empty
       if (document.activeElement !== editorRef.current || !value) {
         editorRef.current.innerHTML = value || '';
       }
     }
   }, [value]);
+
+  // Click outside to close dropdown palettes
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (colorMenuRef.current && !colorMenuRef.current.contains(e.target)) {
+        setIsColorOpen(false);
+      }
+      if (highlightMenuRef.current && !highlightMenuRef.current.contains(e.target)) {
+        setIsHighlightOpen(false);
+      }
+    };
+    if (isColorOpen || isHighlightOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+    };
+  }, [isColorOpen, isHighlightOpen]);
 
   // Update active format buttons based on current selection / cursor position
   const updateToolbarState = useCallback(() => {
@@ -98,30 +146,32 @@ export default function RichTextEditorInput({
       const isBold = document.queryCommandState('bold');
       const isItalic = document.queryCommandState('italic');
       const isUnderline = document.queryCommandState('underline');
+      const isStrike = document.queryCommandState('strikethrough');
       const isBullet = document.queryCommandState('insertUnorderedList');
+      const isOrdered = document.queryCommandState('insertOrderedList');
       const foreColor = document.queryCommandValue('foreColor');
 
-      let activeColor = null;
-      if (foreColor) {
-        // RGB or Hex parsing
-        if (foreColor.includes('220, 38, 38') || foreColor.toLowerCase() === '#dc2626' || foreColor === 'red') {
-          activeColor = 'red';
-        } else if (foreColor.includes('37, 99, 235') || foreColor.toLowerCase() === '#2563eb' || foreColor === 'blue') {
-          activeColor = 'blue';
-        } else if (foreColor.includes('22, 163, 74') || foreColor.toLowerCase() === '#16a34a' || foreColor === 'green') {
-          activeColor = 'green';
-        }
+      let currentHeading = 'p';
+      const formatBlock = document.queryCommandValue('formatBlock');
+      if (formatBlock) {
+        const lower = formatBlock.toLowerCase();
+        if (lower.includes('h1')) currentHeading = 'h1';
+        else if (lower.includes('h2')) currentHeading = 'h2';
       }
 
       setActiveFormats({
         bold: Boolean(isBold),
         italic: Boolean(isItalic),
         underline: Boolean(isUnderline),
+        strike: Boolean(isStrike),
         bullet: Boolean(isBullet),
-        color: activeColor
+        ordered: Boolean(isOrdered),
+        heading: currentHeading,
+        color: foreColor || '#0f172a',
+        highlight: 'transparent'
       });
     } catch {
-      // Browser queryCommandState fallback
+      // Fallback
     }
   }, []);
 
@@ -142,34 +192,31 @@ export default function RichTextEditorInput({
     updateToolbarState();
   };
 
-  const toggleBold = (e) => {
-    e.preventDefault();
-    executeCommand('bold');
+  const handleFormatHeading = (tag) => {
+    executeCommand('formatBlock', tag === activeFormats.heading ? '<p>' : `<${tag}>`);
   };
 
-  const toggleItalic = (e) => {
-    e.preventDefault();
-    executeCommand('italic');
+  const handleSelectColor = (hexColor) => {
+    executeCommand('foreColor', hexColor);
+    setIsColorOpen(false);
   };
 
-  const toggleUnderline = (e) => {
-    e.preventDefault();
-    executeCommand('underline');
-  };
-
-  const toggleBullet = (e) => {
-    e.preventDefault();
-    executeCommand('insertUnorderedList');
-  };
-
-  const toggleColor = (e, colorKey, hexColor) => {
-    e.preventDefault();
-    if (activeFormats.color === colorKey) {
-      // Toggle back to default dark text
-      executeCommand('foreColor', '#0f172a');
-    } else {
-      executeCommand('foreColor', hexColor);
+  const handleSelectHighlight = (hexColor) => {
+    try {
+      executeCommand('hiliteColor', hexColor);
+    } catch {
+      executeCommand('backColor', hexColor);
     }
+    setIsHighlightOpen(false);
+  };
+
+  const handleClearFormat = (e) => {
+    e.preventDefault();
+    executeCommand('removeFormat');
+    executeCommand('foreColor', '#0f172a');
+    try {
+      executeCommand('hiliteColor', 'transparent');
+    } catch {}
   };
 
   const handlePaste = (e) => {
@@ -181,134 +228,355 @@ export default function RichTextEditorInput({
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', width: '100%' }}>
-      {/* Interactive WYSIWYG Toolbar */}
+    <div style={{ display: 'flex', flexDirection: 'column', width: '100%', userSelect: 'none' }}>
+      {/* Microsoft Word Style Formatting Ribbon */}
       <div style={{
         display: 'flex',
         alignItems: 'center',
-        gap: '4px',
+        gap: '2px',
         flexWrap: 'wrap',
-        padding: '6px 8px',
+        padding: '5px 8px',
         backgroundColor: '#f8fafc',
         borderBottom: '1px solid #e2e8f0',
         borderRadius: '8px 8px 0 0'
       }}>
-        {/* Bold Button */}
+        {/* BOLD */}
         <button
           type="button"
-          onMouseDown={toggleBold}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            executeCommand('bold');
+          }}
           style={{
-            ...btnStyle,
+            ...toolbarBtnStyle,
             fontWeight: '800',
-            backgroundColor: activeFormats.bold ? 'rgba(30, 58, 138, 0.12)' : '#ffffff',
-            borderColor: activeFormats.bold ? '#2563eb' : '#cbd5e1',
-            color: activeFormats.bold ? '#1d4ed8' : '#334155',
-            boxShadow: activeFormats.bold ? '0 0 0 1px #2563eb' : 'none'
+            fontFamily: 'serif',
+            fontSize: '13px',
+            backgroundColor: activeFormats.bold ? '#e2e8f0' : 'transparent',
+            color: activeFormats.bold ? '#1e293b' : '#334155'
           }}
           title="Bold (Ctrl+B)"
         >
-          B
+          <strong>B</strong>
         </button>
 
-        {/* Italic Button */}
+        {/* ITALIC */}
         <button
           type="button"
-          onMouseDown={toggleItalic}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            executeCommand('italic');
+          }}
           style={{
-            ...btnStyle,
+            ...toolbarBtnStyle,
             fontStyle: 'italic',
-            backgroundColor: activeFormats.italic ? 'rgba(30, 58, 138, 0.12)' : '#ffffff',
-            borderColor: activeFormats.italic ? '#2563eb' : '#cbd5e1',
-            color: activeFormats.italic ? '#1d4ed8' : '#334155',
-            boxShadow: activeFormats.italic ? '0 0 0 1px #2563eb' : 'none'
+            fontFamily: 'serif',
+            fontSize: '13px',
+            backgroundColor: activeFormats.italic ? '#e2e8f0' : 'transparent',
+            color: activeFormats.italic ? '#1e293b' : '#334155'
           }}
           title="Italic (Ctrl+I)"
         >
-          I
+          <em>I</em>
         </button>
 
-        {/* Underline Button */}
+        {/* UNDERLINE */}
         <button
           type="button"
-          onMouseDown={toggleUnderline}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            executeCommand('underline');
+          }}
           style={{
-            ...btnStyle,
+            ...toolbarBtnStyle,
             textDecoration: 'underline',
-            backgroundColor: activeFormats.underline ? 'rgba(30, 58, 138, 0.12)' : '#ffffff',
-            borderColor: activeFormats.underline ? '#2563eb' : '#cbd5e1',
-            color: activeFormats.underline ? '#1d4ed8' : '#334155',
-            boxShadow: activeFormats.underline ? '0 0 0 1px #2563eb' : 'none'
+            fontFamily: 'serif',
+            fontSize: '13px',
+            backgroundColor: activeFormats.underline ? '#e2e8f0' : 'transparent',
+            color: activeFormats.underline ? '#1e293b' : '#334155'
           }}
           title="Underline (Ctrl+U)"
         >
-          U
+          <u>U</u>
         </button>
 
-        {/* Bullet List Button */}
+        {/* STRIKETHROUGH */}
         <button
           type="button"
-          onMouseDown={toggleBullet}
-          style={{
-            ...btnStyle,
-            fontWeight: '700',
-            backgroundColor: activeFormats.bullet ? 'rgba(30, 58, 138, 0.12)' : '#ffffff',
-            borderColor: activeFormats.bullet ? '#2563eb' : '#cbd5e1',
-            color: activeFormats.bullet ? '#1d4ed8' : '#334155',
-            boxShadow: activeFormats.bullet ? '0 0 0 1px #2563eb' : 'none'
+          onMouseDown={(e) => {
+            e.preventDefault();
+            executeCommand('strikethrough');
           }}
-          title="Bullet Pointer"
+          style={{
+            ...toolbarBtnStyle,
+            textDecoration: 'line-through',
+            fontSize: '12px',
+            fontWeight: '600',
+            backgroundColor: activeFormats.strike ? '#e2e8f0' : 'transparent',
+            color: activeFormats.strike ? '#1e293b' : '#334155'
+          }}
+          title="Strikethrough"
         >
-          • Bullet
+          <s>S</s>
         </button>
 
-        <div style={{ width: '1px', height: '16px', backgroundColor: '#cbd5e1', margin: '0 4px' }} />
+        <div style={separatorStyle} />
 
-        {/* Red Text Color */}
+        {/* HEADING 1 */}
         <button
           type="button"
-          onMouseDown={(e) => toggleColor(e, 'red', '#dc2626')}
-          style={{
-            ...btnStyle,
-            color: '#dc2626',
-            backgroundColor: activeFormats.color === 'red' ? '#fee2e2' : '#ffffff',
-            borderColor: activeFormats.color === 'red' ? '#dc2626' : 'rgba(220, 38, 38, 0.3)',
-            boxShadow: activeFormats.color === 'red' ? '0 0 0 1px #dc2626' : 'none'
+          onMouseDown={(e) => {
+            e.preventDefault();
+            handleFormatHeading('h1');
           }}
-          title="Red Text"
+          style={{
+            ...toolbarBtnStyle,
+            fontSize: '11px',
+            fontWeight: '800',
+            backgroundColor: activeFormats.heading === 'h1' ? '#e2e8f0' : 'transparent',
+            color: activeFormats.heading === 'h1' ? '#1e293b' : '#475569'
+          }}
+          title="Heading 1"
         >
-          🔴 Red
+          H1
         </button>
 
-        {/* Blue Text Color */}
+        {/* HEADING 2 */}
         <button
           type="button"
-          onMouseDown={(e) => toggleColor(e, 'blue', '#2563eb')}
-          style={{
-            ...btnStyle,
-            color: '#2563eb',
-            backgroundColor: activeFormats.color === 'blue' ? '#dbeafe' : '#ffffff',
-            borderColor: activeFormats.color === 'blue' ? '#2563eb' : 'rgba(37, 99, 235, 0.3)',
-            boxShadow: activeFormats.color === 'blue' ? '0 0 0 1px #2563eb' : 'none'
+          onMouseDown={(e) => {
+            e.preventDefault();
+            handleFormatHeading('h2');
           }}
-          title="Blue Text"
+          style={{
+            ...toolbarBtnStyle,
+            fontSize: '11px',
+            fontWeight: '800',
+            backgroundColor: activeFormats.heading === 'h2' ? '#e2e8f0' : 'transparent',
+            color: activeFormats.heading === 'h2' ? '#1e293b' : '#475569'
+          }}
+          title="Heading 2"
         >
-          🔵 Blue
+          H2
         </button>
 
-        {/* Green Text Color */}
+        <div style={separatorStyle} />
+
+        {/* BULLET LIST */}
         <button
           type="button"
-          onMouseDown={(e) => toggleColor(e, 'green', '#16a34a')}
-          style={{
-            ...btnStyle,
-            color: '#16a34a',
-            backgroundColor: activeFormats.color === 'green' ? '#dcfce7' : '#ffffff',
-            borderColor: activeFormats.color === 'green' ? '#16a34a' : 'rgba(22, 163, 74, 0.3)',
-            boxShadow: activeFormats.color === 'green' ? '0 0 0 1px #16a34a' : 'none'
+          onMouseDown={(e) => {
+            e.preventDefault();
+            executeCommand('insertUnorderedList');
           }}
-          title="Green Text"
+          style={{
+            ...toolbarBtnStyle,
+            backgroundColor: activeFormats.bullet ? '#e2e8f0' : 'transparent',
+            color: activeFormats.bullet ? '#1e293b' : '#334155'
+          }}
+          title="Bulleted List"
         >
-          🟢 Green
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="8" y1="6" x2="21" y2="6"></line>
+            <line x1="8" y1="12" x2="21" y2="12"></line>
+            <line x1="8" y1="18" x2="21" y2="18"></line>
+            <circle cx="3" cy="6" r="1.5" fill="currentColor"></circle>
+            <circle cx="3" cy="12" r="1.5" fill="currentColor"></circle>
+            <circle cx="3" cy="18" r="1.5" fill="currentColor"></circle>
+          </svg>
+        </button>
+
+        {/* NUMBERED LIST */}
+        <button
+          type="button"
+          onMouseDown={(e) => {
+            e.preventDefault();
+            executeCommand('insertOrderedList');
+          }}
+          style={{
+            ...toolbarBtnStyle,
+            backgroundColor: activeFormats.ordered ? '#e2e8f0' : 'transparent',
+            color: activeFormats.ordered ? '#1e293b' : '#334155'
+          }}
+          title="Numbered List"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="10" y1="6" x2="21" y2="6"></line>
+            <line x1="10" y1="12" x2="21" y2="12"></line>
+            <line x1="10" y1="18" x2="21" y2="18"></line>
+            <path d="M4 6h1v4"></path>
+            <path d="M4 10h2"></path>
+            <path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"></path>
+          </svg>
+        </button>
+
+        <div style={separatorStyle} />
+
+        {/* MS WORD FONT COLOR BUTTON (A with color underline) */}
+        <div ref={colorMenuRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setIsColorOpen(!isColorOpen);
+              setIsHighlightOpen(false);
+            }}
+            style={{
+              ...toolbarBtnStyle,
+              display: 'inline-flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              padding: '2px 6px',
+              backgroundColor: isColorOpen ? '#e2e8f0' : 'transparent'
+            }}
+            title="Font Color"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+              <span style={{ fontSize: '13px', fontWeight: '800', fontFamily: 'serif', lineHeight: 1 }}>A</span>
+              <span style={{ fontSize: '7px', opacity: 0.7 }}>▼</span>
+            </div>
+            <div style={{ width: '12px', height: '2.5px', backgroundColor: activeFormats.color !== '#0f172a' ? activeFormats.color : '#dc2626', borderRadius: '1px', marginTop: '1px' }} />
+          </button>
+
+          {/* Color Palette Popover */}
+          {isColorOpen && (
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 4px)',
+              left: 0,
+              zIndex: 1200,
+              backgroundColor: '#ffffff',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.15)',
+              padding: '8px',
+              width: '180px'
+            }} className="fade-in">
+              <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>
+                Text Color
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '5px' }}>
+                {FONT_COLORS.map((fc, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleSelectColor(fc.color)}
+                    style={{
+                      width: '24px',
+                      height: '24px',
+                      borderRadius: '4px',
+                      backgroundColor: fc.color,
+                      border: '1px solid rgba(0,0,0,0.15)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      transition: 'transform 0.1s ease'
+                    }}
+                    title={fc.label}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.15)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* MS WORD TEXT HIGHLIGHT COLOR (Highlighter Pen icon) */}
+        <div ref={highlightMenuRef} style={{ position: 'relative' }}>
+          <button
+            type="button"
+            onClick={() => {
+              setIsHighlightOpen(!isHighlightOpen);
+              setIsColorOpen(false);
+            }}
+            style={{
+              ...toolbarBtnStyle,
+              display: 'inline-flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              padding: '2px 6px',
+              backgroundColor: isHighlightOpen ? '#e2e8f0' : 'transparent'
+            }}
+            title="Text Highlight Color"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '2px' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="m9 11-6 6v3h3l6-6"></path>
+                <path d="m22 12-4.6 4.6a2 2 0 0 1-2.8 0l-5.2-5.2a2 2 0 0 1 0-2.8L14 4"></path>
+              </svg>
+              <span style={{ fontSize: '7px', opacity: 0.7 }}>▼</span>
+            </div>
+            <div style={{ width: '12px', height: '2.5px', backgroundColor: '#fef08a', borderRadius: '1px', marginTop: '1px' }} />
+          </button>
+
+          {/* Highlight Palette Popover */}
+          {isHighlightOpen && (
+            <div style={{
+              position: 'absolute',
+              top: 'calc(100% + 4px)',
+              left: 0,
+              zIndex: 1200,
+              backgroundColor: '#ffffff',
+              borderRadius: '8px',
+              border: '1px solid #cbd5e1',
+              boxShadow: '0 8px 24px rgba(15, 23, 42, 0.15)',
+              padding: '8px',
+              width: '180px'
+            }} className="fade-in">
+              <div style={{ fontSize: '10px', fontWeight: '700', color: '#64748b', textTransform: 'uppercase', marginBottom: '6px' }}>
+                Highlight Color
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '6px' }}>
+                {HIGHLIGHT_COLORS.map((hc, idx) => (
+                  <div
+                    key={idx}
+                    onClick={() => handleSelectHighlight(hc.color)}
+                    style={{
+                      height: '24px',
+                      borderRadius: '4px',
+                      backgroundColor: hc.preview,
+                      border: hc.border ? `1px solid ${hc.border}` : '1px solid rgba(0,0,0,0.1)',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: '10px',
+                      fontWeight: '600',
+                      color: hc.color === 'transparent' ? '#64748b' : '#0f172a',
+                      transition: 'transform 0.1s ease'
+                    }}
+                    title={hc.label}
+                    onMouseEnter={(e) => e.currentTarget.style.transform = 'scale(1.05)'}
+                    onMouseLeave={(e) => e.currentTarget.style.transform = 'scale(1)'}
+                  >
+                    {hc.color === 'transparent' ? 'None' : ''}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div style={separatorStyle} />
+
+        {/* CLEAR FORMATTING */}
+        <button
+          type="button"
+          onMouseDown={handleClearFormat}
+          style={{
+            ...toolbarBtnStyle,
+            fontSize: '11.5px',
+            color: '#64748b',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '2px'
+          }}
+          title="Clear All Formatting"
+        >
+          <span style={{ fontWeight: '700' }}>T</span>
+          <span style={{ fontSize: '10px', textDecoration: 'line-through' }}>x</span>
         </button>
       </div>
 
@@ -341,16 +609,26 @@ export default function RichTextEditorInput({
   );
 }
 
-const btnStyle = {
+const toolbarBtnStyle = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  padding: '4px 9px',
-  borderRadius: '6px',
-  border: '1px solid #cbd5e1',
-  fontSize: '11.5px',
+  height: '28px',
+  minWidth: '28px',
+  padding: '0 6px',
+  borderRadius: '5px',
+  border: '1px solid transparent',
+  fontSize: '12.5px',
   fontWeight: '600',
   cursor: 'pointer',
-  transition: 'all 0.15s ease',
-  userSelect: 'none'
+  transition: 'all 0.1s ease',
+  backgroundColor: 'transparent',
+  color: '#334155'
+};
+
+const separatorStyle = {
+  width: '1px',
+  height: '16px',
+  backgroundColor: '#cbd5e1',
+  margin: '0 4px'
 };

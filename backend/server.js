@@ -40,6 +40,23 @@ mongoose.connect(mongoURI)
       console.error('Migration error:', e.message);
     }
 
+    // Clean up existing tickets to retain only last 4 history activities (hard delete rest to save DB storage)
+    try {
+      const Ticket = mongoose.model('Ticket');
+      const ticketsWithLongHistory = await Ticket.find({ 'history.4': { $exists: true } });
+      for (const t of ticketsWithLongHistory) {
+        if (t.history && t.history.length > 4) {
+          t.history = t.history.slice(-4);
+          await t.save();
+        }
+      }
+      if (ticketsWithLongHistory.length > 0) {
+        console.log(`[Storage Optimization] Cleaned up legacy activity history for ${ticketsWithLongHistory.length} tickets to max 4 entries.`);
+      }
+    } catch (e) {
+      console.error('History cleanup error:', e.message);
+    }
+
     app.listen(PORT, () => {
       console.log(`Server is running on port ${PORT}`);
     });

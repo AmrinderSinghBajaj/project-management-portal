@@ -256,8 +256,7 @@ button.danger:hover {
 }
 
 .ticket-card:hover {
-  border-color: rgba(30, 58, 138, 0.2) !important;
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06) !important;
+  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08) !important;
   transform: translateY(-2px);
 }
 
@@ -362,3 +361,207 @@ button.danger:hover {
   font-weight: 600;
   word-break: break-all;
 }
+
+/* Interactive Scorecard Metric Cards */
+.interactive-metric-card {
+  cursor: pointer !important;
+  user-select: none;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.18s ease, border-color 0.18s ease, background-color 0.18s ease !important;
+}
+
+.interactive-metric-card:hover {
+  transform: translateY(-3px) scale(1.02) !important;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.12) !important;
+}
+
+.interactive-metric-card:active {
+  transform: translateY(0) scale(0.99) !important;
+}
+
+/* Performance Score Tooltip */
+.perf-score-tooltip-wrapper {
+  position: relative;
+}
+
+.perf-score-tooltip-box {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  background: #ffffff;
+  color: #0f172a;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 14px 16px;
+  box-shadow: 0 20px 45px -10px rgba(15, 23, 42, 0.18), 0 0 0 1px rgba(15, 23, 42, 0.04);
+  z-index: 999999;
+  width: 350px;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(6px) scale(0.96);
+  transition: opacity 0.2s cubic-bezier(0.16, 1, 0.3, 1), transform 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  text-align: left;
+}
+
+/* Arrow Notch with Border */
+.perf-score-tooltip-box::before {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  right: 22px;
+  border-width: 7px;
+  border-style: solid;
+  border-color: transparent transparent #e2e8f0 transparent;
+}
+
+.perf-score-tooltip-box::after {
+  content: '';
+  position: absolute;
+  bottom: 100%;
+  right: 23px;
+  border-width: 6px;
+  border-style: solid;
+  border-color: transparent transparent #ffffff transparent;
+}
+
+.perf-score-tooltip-wrapper:hover .perf-score-tooltip-box {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+
+.perf-tt-header {
+  padding-bottom: 10px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.perf-tt-title-group {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.perf-tt-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #0f172a;
+  letter-spacing: 0.1px;
+}
+
+.perf-tt-score-pill {
+  font-size: 11px;
+  font-weight: 800;
+  color: #1e3a8a;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 20px;
+  padding: 2px 8px;
+}
+
+.perf-tt-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.perf-tt-card {
+  background: #f8fafc;
+  border: 1px solid #edf2f7;
+  border-radius: 9px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  transition: background-color 0.15s ease;
+}
+
+.perf-tt-card:hover {
+  background: #f1f5f9;
+}
+
+.perf-tt-card-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.perf-tt-metric-name {
+  font-size: 11.5px;
+  font-weight: 700;
+  color: #1e293b;
+  flex: 1;
+}
+
+.perf-tt-val {
+  font-size: 12px;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.perf-tt-badge {
+  font-size: 9.5px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 5px;
+  letter-spacing: 0.2px;
+  flex-shrink: 0;
+}
+
+.perf-tt-badge.badge-blue {
+  color: #1d4ed8;
+  background: #eff6ff;
+  border: 1px solid #dbeafe;
+}
+
+.perf-tt-badge.badge-green {
+  color: #047857;
+  background: #ecfdf5;
+  border: 1px solid #d1fae5;
+}
+
+.perf-tt-badge.badge-amber {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fef3c7;
+}
+
+.perf-tt-formula {
+  font-size: 10px;
+  color: #64748b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.perf-tt-footer {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e2e8f0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.perf-tt-footer-label {
+  font-size: 9px;
+  font-weight: 700;
+  color: #94a3b8;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.perf-tt-equation-box {
+  font-size: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1e293b;
+  background: #f1f5f9;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-all;
+}
+
+
+
+

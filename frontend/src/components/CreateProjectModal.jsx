@@ -750,7 +750,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1000,
+    zIndex: 9999,
   },
   modal: {
     width: '100%',

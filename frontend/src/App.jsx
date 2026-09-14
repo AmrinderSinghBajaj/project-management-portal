@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AuthScreen from './components/AuthScreen';
 import Sidebar from './components/Sidebar';
 import ProjectBoard from './components/ProjectBoard';
@@ -34,10 +34,29 @@ export default function App() {
   const [inspectedUserForScorecard, setInspectedUserForScorecard] = useState(null);
   const [reloadTrigger, setReloadTrigger] = useState(0);
   const [isVerifyingSession, setIsVerifyingSession] = useState(true);
+  const projectCacheRef = useRef(new Map());
+
+  const handleSelectProject = (projId) => {
+    setActiveProjectId(projId);
+    if (!projId) {
+      setActiveProjectData(null);
+      return;
+    }
+    // Instant switch from cache or optimistic basic project info
+    if (projectCacheRef.current.has(projId)) {
+      setActiveProjectData(projectCacheRef.current.get(projId));
+    } else {
+      const basicProj = projects.find(p => p._id === projId);
+      if (basicProj) {
+        setActiveProjectData({ project: basicProj, tickets: [] });
+      }
+    }
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('pm_user');
     localStorage.removeItem('pm_token');
+    projectCacheRef.current.clear();
     setCurrentUser(null);
     setAuthToken(null);
     setActiveProjectId(null);
@@ -121,7 +140,7 @@ export default function App() {
 
         // If user is a Client and has assigned project, auto-open their project board
         if (currentUser.role === 'Client' && data.length > 0 && !activeProjectId) {
-          setActiveProjectId(data[0]._id);
+          handleSelectProject(data[0]._id);
         }
       } catch (err) {
         console.error(err);
@@ -129,12 +148,11 @@ export default function App() {
     };
 
     fetchProjects();
-  }, [currentUser, authToken, reloadTrigger, isVerifyingSession, activeProjectId]);
+  }, [currentUser, authToken, reloadTrigger, isVerifyingSession]);
 
   // Fetch full project data if active
   useEffect(() => {
     if (!activeProjectId || !currentUser) {
-      setActiveProjectData(null);
       return;
     }
 
@@ -154,6 +172,7 @@ export default function App() {
           throw new Error('Failed to load project details');
         }
         const data = await res.json();
+        projectCacheRef.current.set(activeProjectId, data);
         setActiveProjectData(data);
         setSelectedTicket(prev => {
           if (!prev) return null;
@@ -169,6 +188,7 @@ export default function App() {
   }, [activeProjectId, authToken, reloadTrigger, currentUser]);
 
   const triggerRefresh = () => {
+    projectCacheRef.current.clear();
     setReloadTrigger(prev => prev + 1);
   };
 
@@ -221,6 +241,15 @@ export default function App() {
     );
   }
 
+  const handleOpenScorecard = (targetUser) => {
+    if (!targetUser) return;
+    const roleLower = (targetUser.role || '').toLowerCase();
+    if (roleLower.includes('delivery head') || roleLower.includes('ceo')) {
+      return; // Performance report not applicable for Delivery Head and CEO
+    }
+    setInspectedUserForScorecard(targetUser);
+  };
+
   return (
     <div className="app-container">
       {/* Left Sidebar Menu (Hidden for Client for full-width board) */}
@@ -228,13 +257,13 @@ export default function App() {
         <Sidebar
           projects={projects}
           activeProject={activeProjectData?.project}
-          onSelectProject={setActiveProjectId}
+          onSelectProject={handleSelectProject}
           currentUser={currentUser}
           onLogout={handleLogout}
           onTriggerCreateProject={() => setShowCreateProject(true)}
           onTriggerUserManagement={() => setShowUserManagement(true)}
           onReorderProjects={handleReorderProjects}
-          onOpenScorecard={setInspectedUserForScorecard}
+          onOpenScorecard={handleOpenScorecard}
         />
       )}
 
@@ -242,19 +271,20 @@ export default function App() {
       <div style={styles.workspace}>
         {activeProjectData ? (
           <ProjectBoard
+            key={activeProjectData.project._id}
             projectData={activeProjectData}
             currentUser={currentUser}
             onRefresh={triggerRefresh}
             onSelectTicket={setSelectedTicket}
             onEditProject={setProjectToEdit}
-            onBackToDashboard={() => setActiveProjectId(null)}
+            onBackToDashboard={() => handleSelectProject(null)}
             onLogout={handleLogout}
           />
         ) : ['Delivery Head', 'CEO'].includes(currentUser.role) ? (
           <DeliveryHeadDashboard
             currentUser={currentUser}
-            onSelectProject={setActiveProjectId}
-            onOpenScorecard={setInspectedUserForScorecard}
+            onSelectProject={handleSelectProject}
+            onOpenScorecard={handleOpenScorecard}
             onTriggerCreateProject={() => setShowCreateProject(true)}
             onTriggerUserManagement={() => setShowUserManagement(true)}
           />
@@ -262,12 +292,12 @@ export default function App() {
           <PMProjectsDashboard
             projects={projects}
             currentUser={currentUser}
-            onSelectProject={setActiveProjectId}
+            onSelectProject={handleSelectProject}
             onTriggerCreateProject={() => setShowCreateProject(true)}
             onTriggerUserManagement={() => setShowUserManagement(true)}
             onEditProject={setProjectToEdit}
             onRefresh={triggerRefresh}
-            onOpenScorecard={setInspectedUserForScorecard}
+            onOpenScorecard={handleOpenScorecard}
           />
         ) : (
           <div style={styles.splash} className="fade-in">
@@ -334,6 +364,7 @@ export default function App() {
           userId={inspectedUserForScorecard._id}
           userEmail={inspectedUserForScorecard.email}
           userName={inspectedUserForScorecard.name}
+          currentUser={currentUser}
           onClose={() => setInspectedUserForScorecard(null)}
         />
       )}

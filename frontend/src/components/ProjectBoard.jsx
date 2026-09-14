@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { API_BASE, SERVER_BASE } from '../config';
 import RichTextEditorInput, { getWordCountFromHtml } from './RichTextEditor';
 import { 
@@ -10,6 +11,7 @@ import {
   getFullImageUrl 
 } from '../utils/imageUtils';
 import VideoPromptModal from './VideoPromptModal';
+import CustomDateTimePicker from './CustomDateTimePicker';
 
 const LINK_CATEGORIES = [
   'Live URL',
@@ -71,6 +73,172 @@ const getPriorityStyle = (priority) => {
   }
 };
 
+const formatDeadlineBadge = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+
+  const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  if (isToday) return `Today, ${timeStr}`;
+  if (isTomorrow) return `Tomorrow, ${timeStr}`;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${timeStr}`;
+};
+
+const getTicketTimeUrgency = (ticket) => {
+  if (!ticket || !ticket.deadline) {
+    return {
+      hasDeadline: false,
+      pill: null,
+      accentBorder: 'transparent',
+      borderColor: 'rgba(15, 23, 42, 0.09)',
+      shadow: '0 2px 6px rgba(15, 23, 42, 0.02)',
+      tooltip: ''
+    };
+  }
+
+  const deadlineTime = new Date(ticket.deadline).getTime();
+  if (isNaN(deadlineTime)) {
+    return {
+      hasDeadline: false,
+      pill: null,
+      accentBorder: 'transparent',
+      borderColor: 'rgba(15, 23, 42, 0.09)',
+      shadow: '0 2px 6px rgba(15, 23, 42, 0.02)',
+      tooltip: ''
+    };
+  }
+
+  const now = Date.now();
+  const statusLower = (ticket.status || '').toLowerCase();
+  const isShiftedToTestingOrCompleted = 
+    statusLower.includes('ready') || 
+    statusLower.includes('test') || 
+    statusLower.includes('live') || 
+    statusLower.includes('done') || 
+    statusLower.includes('closed');
+
+  // Condition 1: Shifted to Ready for Testing / Tested / Live (Completed dev stage)
+  if (isShiftedToTestingOrCompleted) {
+    return {
+      hasDeadline: true,
+      phase: 'completed',
+      pill: {
+        icon: '✓',
+        text: 'In QA / Testing',
+        bg: '#ecfdf5',
+        color: '#059669',
+        border: '#a7f3d0'
+      },
+      accentBorder: '#10b981',
+      borderColor: 'rgba(16, 185, 129, 0.3)',
+      shadow: '0 2px 6px rgba(16, 185, 129, 0.04)',
+      tooltip: `Shifted to ${ticket.status} (Deadline: ${formatDeadlineBadge(ticket.deadline)})`
+    };
+  }
+
+  // Condition 2: Deadline passed while still in To be Started or In Progress (Overdue)
+  if (now > deadlineTime) {
+    const overdueDiff = now - deadlineTime;
+    let overdueStr = '';
+    if (overdueDiff < 60000) {
+      overdueStr = 'Just now';
+    } else if (overdueDiff < 3600000) {
+      const mins = Math.floor(overdueDiff / 60000);
+      overdueStr = `${mins}m ago`;
+    } else if (overdueDiff < 86400000) {
+      const hrs = Math.floor(overdueDiff / 3600000);
+      const mins = Math.floor((overdueDiff % 3600000) / 60000);
+      overdueStr = mins > 0 ? `${hrs}h ${mins}m ago` : `${hrs}h ago`;
+    } else {
+      const days = Math.floor(overdueDiff / 86400000);
+      const hrs = Math.floor((overdueDiff % 86400000) / 3600000);
+      overdueStr = hrs > 0 ? `${days}d ${hrs}h ago` : `${days}d ago`;
+    }
+
+    return {
+      hasDeadline: true,
+      phase: 'overdue',
+      pill: {
+        icon: '🚨',
+        text: `Overdue (${overdueStr})`,
+        bg: '#fef2f2',
+        color: '#dc2626',
+        border: '#fca5a5',
+        pulse: true
+      },
+      accentBorder: '#dc2626',
+      borderColor: 'rgba(220, 38, 38, 0.45)',
+      shadow: '0 3px 12px rgba(220, 38, 38, 0.12)',
+      tooltip: `Deadline passed (${formatDeadlineBadge(ticket.deadline)}) - Immediate attention required!`
+    };
+  }
+
+  // Condition 3: Active Countdown
+  const diff = deadlineTime - now;
+  let createdTime = ticket.createdAt ? new Date(ticket.createdAt).getTime() : 0;
+  if (isNaN(createdTime) || createdTime <= 0 || createdTime >= deadlineTime) {
+    createdTime = deadlineTime - 3 * 3600 * 1000;
+  }
+  const totalDuration = Math.max(60000, deadlineTime - createdTime);
+  const elapsed = now - createdTime;
+  const progress = Math.min(1.0, Math.max(0.0, elapsed / totalDuration));
+
+  let timeLeftStr = '';
+  if (diff < 60000) {
+    timeLeftStr = '< 1m left';
+  } else if (diff < 3600000) {
+    const mins = Math.floor(diff / 60000);
+    timeLeftStr = `${mins}m left`;
+  } else if (diff < 86400000) {
+    const hrs = Math.floor(diff / 3600000);
+    const mins = Math.floor((diff % 3600000) / 60000);
+    timeLeftStr = mins > 0 ? `${hrs}h ${mins}m left` : `${hrs}h left`;
+  } else {
+    const days = Math.floor(diff / 86400000);
+    const hrs = Math.floor((diff % 86400000) / 3600000);
+    timeLeftStr = hrs > 0 ? `${days}d ${hrs}h left` : `${days}d left`;
+  }
+
+  // Phase 3: Final 1/3 window (Light Red / Coral)
+  if (progress >= 0.6666) {
+    return {
+      hasDeadline: true,
+      phase: 'phase3',
+      accentBorder: '#f87171', // Light Red
+      borderColor: 'rgba(248, 113, 113, 0.4)',
+      shadow: '0 2px 8px rgba(248, 113, 113, 0.1)',
+      tooltip: `Phase 3 (Light Red): Final stage before deadline (${formatDeadlineBadge(ticket.deadline)})`
+    };
+  }
+
+  // Phase 2: Middle 1/3 window (Sky Blue)
+  if (progress >= 0.3333) {
+    return {
+      hasDeadline: true,
+      phase: 'phase2',
+      accentBorder: '#0ea5e9', // Sky Blue
+      borderColor: 'rgba(14, 165, 233, 0.35)',
+      shadow: '0 2px 8px rgba(14, 165, 233, 0.08)',
+      tooltip: `Phase 2 (Sky Blue): Approaching deadline (${formatDeadlineBadge(ticket.deadline)})`
+    };
+  }
+
+  // Phase 1: Initial 1/3 window (Calm Neutral / White stage)
+  return {
+    hasDeadline: true,
+    phase: 'phase1',
+    accentBorder: '#e2e8f0', // Subtle Neutral
+    borderColor: 'rgba(15, 23, 42, 0.09)',
+    shadow: '0 2px 6px rgba(15, 23, 42, 0.02)',
+    tooltip: `Phase 1: Initial window (Deadline: ${formatDeadlineBadge(ticket.deadline)})`
+  };
+};
+
 export default function ProjectBoard({ 
   projectData, 
   currentUser, 
@@ -86,6 +254,14 @@ export default function ProjectBoard({
   const [showAddCR, setShowAddCR] = useState(false);
   const [showEditColumns, setShowEditColumns] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [, setTimeTick] = useState(Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setTimeTick(Date.now());
+    }, 30000);
+    return () => clearInterval(timer);
+  }, []);
   
   // New ticket state
   const [ticketTask, setTicketTask] = useState('');
@@ -448,6 +624,14 @@ export default function ProjectBoard({
       return;
     }
 
+    if (ticketDeadline) {
+      const deadlineTime = new Date(ticketDeadline).getTime();
+      if (!isNaN(deadlineTime) && deadlineTime < Date.now()) {
+        alert('Invalid Deadline: The deadline cannot be set in the past. Please select a future date and time.');
+        return;
+      }
+    }
+
     setLoading(true);
     try {
       let uploadedImagePaths = [];
@@ -506,7 +690,10 @@ export default function ProjectBoard({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           status: newStatus,
-          userName: currentUser.name
+          userName: currentUser.name,
+          userEmail: currentUser.email,
+          userId: currentUser._id,
+          userRole: currentUser.role
         })
       });
       if (!res.ok) throw new Error('Failed to update status');
@@ -567,6 +754,8 @@ export default function ProjectBoard({
         body: JSON.stringify({ 
           status: targetStatus, 
           userName: currentUser.name,
+          userEmail: currentUser.email,
+          userId: currentUser._id,
           userRole: currentUser.role
         })
       });
@@ -1617,47 +1806,35 @@ export default function ProjectBoard({
                   </div>
                   
                   <div style={styles.ticketsContainer}>
-                    {colTickets.map(ticket => (
-                      <div 
-                        key={ticket._id} 
-                        style={{ ...styles.ticketCard, cursor: 'grab' }} 
-                        className="ticket-card"
-                        draggable
-                        onDragStart={(e) => e.dataTransfer.setData('text/plain', ticket._id)}
-                      >
-                        <div onClick={() => onSelectTicket(ticket)} style={styles.ticketCardBody}>
-                          {/* Top Row: Type Logo & Client Tag on Left, Ticket ID & Priority Dot on Extreme Right */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                              <span 
-                                title={`Type: ${ticket.ticketType || 'Task'}`} 
-                                style={{ 
-                                  fontSize: '14px', 
-                                  lineHeight: 1, 
-                                  cursor: 'default',
-                                  display: 'inline-flex',
-                                  alignItems: 'center'
-                                }}
-                              >
-                                {getTicketTypeStyle(ticket.ticketType).icon}
-                              </span>
-                              {Boolean(ticket.isClientTicket || ticket.reportedByRole === 'Client') && (
-                                <span style={{
-                                  fontSize: '10px',
-                                  fontWeight: '700',
-                                  color: '#2563eb',
-                                  backgroundColor: '#eff6ff',
-                                  border: '1px solid #bfdbfe',
-                                  borderRadius: '4px',
-                                  padding: '1px 5px',
-                                  letterSpacing: '0.3px',
-                                  textTransform: 'uppercase'
-                                }}>
-                                  Client
-                                </span>
-                              )}
-                            </div>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    {colTickets.map(ticket => {
+                      const urgency = getTicketTimeUrgency(ticket);
+                      const hasBottomTags = Boolean(
+                        ticket.isClientTicket || 
+                        ticket.reportedByRole === 'Client' || 
+                        (ticket.tags && ticket.tags.length > 0)
+                      );
+
+                      return (
+                        <div 
+                          key={ticket._id} 
+                          style={{ 
+                            ...styles.ticketCard, 
+                            cursor: 'grab',
+                            backgroundColor: '#ffffff',
+                            borderColor: urgency.borderColor || 'rgba(15, 23, 42, 0.09)',
+                            borderLeft: urgency.hasDeadline ? `4px solid ${urgency.accentBorder}` : '1px solid rgba(15, 23, 42, 0.09)',
+                            boxShadow: urgency.shadow || styles.ticketCard.boxShadow,
+                            flexShrink: 0,
+                            minHeight: 'fit-content'
+                          }} 
+                          className="ticket-card"
+                          draggable
+                          onDragStart={(e) => e.dataTransfer.setData('text/plain', ticket._id)}
+                          title={urgency.tooltip || ''}
+                        >
+                          <div onClick={() => onSelectTicket(ticket)} style={styles.ticketCardBody}>
+                            {/* Top Row: Ticket ID (Left) & Priority Dot (Right) */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
                               <span style={styles.ticketCardId}>#{ticket._id.slice(-6).toUpperCase()}</span>
                               <span 
                                 title={`Priority: ${ticket.priority || 'Medium'}`}
@@ -1671,28 +1848,75 @@ export default function ProjectBoard({
                                 }}
                               />
                             </div>
-                          </div>
 
-                          {/* Full-width Ticket Title */}
-                          <h4 style={styles.ticketTask}>{ticket.task}</h4>
+                            {/* Primary Prominent Ticket Title */}
+                            <h4 style={styles.ticketTask}>{ticket.task}</h4>
 
-                          {/* Tech Tags Row */}
-                          <div style={styles.tagRow}>
-                            {ticket.tags?.map(tag => {
-                              const label = tag === 'ios' ? 'iOS' : tag === 'qa' ? 'QA' : tag.charAt(0).toUpperCase() + tag.slice(1);
-                              return (
-                                <span key={tag} style={{
-                                  ...styles.tag,
-                                  ...styles[`tag_${tag.toLowerCase()}`]
-                                }}>
-                                  {label}
-                                </span>
-                              );
-                            })}
+                            {/* Bottom Row: Tech Team Tag (Left Bottom) & Type Tag (Right Bottom) */}
+                            <div style={{ 
+                              display: 'flex', 
+                              justifyContent: 'space-between', 
+                              alignItems: 'center', 
+                              marginTop: '6px', 
+                              gap: '6px'
+                            }}>
+                              {/* Left Bottom: Tech Team Tag(s) & Client Badge */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                                {Boolean(ticket.isClientTicket || ticket.reportedByRole === 'Client') && (
+                                  <span style={{
+                                    fontSize: '9.5px',
+                                    fontWeight: '700',
+                                    color: '#2563eb',
+                                    backgroundColor: '#eff6ff',
+                                    border: '1px solid #bfdbfe',
+                                    borderRadius: '4px',
+                                    padding: '1px 5px',
+                                    letterSpacing: '0.3px',
+                                    textTransform: 'uppercase'
+                                  }}>
+                                    Client
+                                  </span>
+                                )}
+
+                                {ticket.tags?.map(tag => {
+                                  const label = tag === 'ios' ? 'iOS' : tag === 'qa' ? 'QA' : tag.charAt(0).toUpperCase() + tag.slice(1);
+                                  return (
+                                    <span key={tag} style={{
+                                      ...styles.tag,
+                                      ...styles[`tag_${tag.toLowerCase()}`]
+                                    }}>
+                                      {label}
+                                    </span>
+                                  );
+                                })}
+                              </div>
+
+                              {/* Right Bottom: Bug / Task / Feature Type Icon Only */}
+                              {(() => {
+                                const typeStyle = getTicketTypeStyle(ticket.ticketType);
+                                return (
+                                  <span 
+                                    style={{
+                                      fontSize: '13px',
+                                      lineHeight: 1,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      justifyContent: 'center',
+                                      flexShrink: 0,
+                                      opacity: 0.9,
+                                      cursor: 'default'
+                                    }}
+                                    title={`Type: ${ticket.ticketType || 'Task'}`}
+                                  >
+                                    {typeStyle.icon}
+                                  </span>
+                                );
+                              })()}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 </div>
               );
@@ -2047,7 +2271,7 @@ export default function ProjectBoard({
       </div>
 
       {/* CREATE TICKET MODAL (CENTERED) */}
-      {showAddTicket && (
+      {showAddTicket && createPortal(
         <div style={styles.overlay} onClick={() => setShowAddTicket(false)}>
           <div 
             className="fade-in" 
@@ -2073,8 +2297,8 @@ export default function ProjectBoard({
                 />
               </div>
 
-              {/* 3-Column Row: Type + Priority + Tech */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '10px', alignItems: 'flex-start' }}>
+              {/* 4-Column Row: Type + Priority + Tech + Timeline */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.15fr 1.25fr', gap: '10px', alignItems: 'flex-start' }}>
                 <div style={styles.modalInputGroup}>
                   <label style={styles.formFieldLabel}>Type</label>
                   <select
@@ -2171,6 +2395,16 @@ export default function ProjectBoard({
                       </>
                     )}
                   </div>
+                </div>
+
+                <div style={styles.modalInputGroup}>
+                  <label style={styles.formFieldLabel}>Timeline</label>
+                  <CustomDateTimePicker
+                    value={ticketDeadline}
+                    onChange={(val) => setTicketDeadline(val)}
+                    placeholder="Select date & time"
+                    align="right"
+                  />
                 </div>
               </div>
 
@@ -2369,11 +2603,12 @@ export default function ProjectBoard({
               </div>
             </form>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* CREATE CR DRAWER */}
-      {showAddCR && (
+      {showAddCR && createPortal(
         <>
           <div style={styles.drawerOverlay} onClick={() => setShowAddCR(false)} />
           <div className="slide-in-right" style={styles.drawerPanel}>
@@ -2416,11 +2651,12 @@ export default function ProjectBoard({
               </div>
 
               <div style={styles.modalInputGroup}>
-                <label>Task Deadline</label>
-                <input
-                  type="date"
+                <label style={styles.formFieldLabel}>Task Deadline</label>
+                <CustomDateTimePicker
                   value={crDeadline}
-                  onChange={(e) => setCrDeadline(e.target.value)}
+                  onChange={(val) => setCrDeadline(val)}
+                  placeholder="Select deadline..."
+                  align="left"
                 />
               </div>
 
@@ -2515,11 +2751,12 @@ export default function ProjectBoard({
               </div>
             </form>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* MANAGE COLUMNS DRAWER */}
-      {showEditColumns && (
+      {showEditColumns && createPortal(
         <>
           <div style={styles.drawerOverlay} onClick={() => setShowEditColumns(false)} />
           <div className="slide-in-right" style={styles.drawerPanel}>
@@ -2585,11 +2822,12 @@ export default function ProjectBoard({
               </div>
             </form>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* ADD / EDIT IMPORTANT LINK DRAWER */}
-      {showAddLinkModal && (
+      {showAddLinkModal && createPortal(
         <>
           <div style={styles.drawerOverlay} onClick={handleCloseLinkModal} />
           <div className="slide-in-right" style={styles.drawerPanel}>
@@ -2672,7 +2910,8 @@ export default function ProjectBoard({
               </div>
             </form>
           </div>
-        </>
+        </>,
+        document.body
       )}
 
       {/* Video prompt modal */}
@@ -2691,9 +2930,8 @@ const styles = {
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(15, 23, 42, 0.02)',
-    backdropFilter: 'none',
-    zIndex: 900,
+    backgroundColor: 'rgba(15, 23, 42, 0.45)',
+    zIndex: 9998,
   },
   drawerPanel: {
     position: 'fixed',
@@ -2705,7 +2943,7 @@ const styles = {
     borderLeft: '1px solid var(--panel-border)',
     boxShadow: '-10px 0 40px rgba(15, 23, 42, 0.08)',
     padding: '40px 30px',
-    zIndex: 1000,
+    zIndex: 9999,
     display: 'flex',
     flexDirection: 'column',
     overflowY: 'auto',
@@ -2912,14 +3150,14 @@ const styles = {
     padding: '14px 12px',
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    gap: '10px',
     background: '#ffffff',
     border: '1px solid var(--panel-border)',
     borderRadius: '14px',
     boxShadow: '0 4px 16px rgba(15, 23, 42, 0.03)',
     minWidth: 0,
     height: '100%',
-    overflowY: 'auto',
+    overflow: 'hidden',
   },
   columnHeader: {
     display: 'flex',
@@ -2928,6 +3166,7 @@ const styles = {
     paddingBottom: '8px',
     borderBottom: '1px solid var(--panel-border)',
     minHeight: '32px',
+    flexShrink: 0,
   },
   columnMeta: {
     display: 'flex',
@@ -2953,40 +3192,46 @@ const styles = {
   ticketsContainer: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '12px',
+    gap: '10px',
     overflowY: 'auto',
     flex: 1,
+    minHeight: 0,
+    paddingRight: '2px',
+    paddingBottom: '8px',
   },
   ticketCard: {
-    padding: '12px',
+    padding: '11px 12px 10px 12px',
     cursor: 'default',
     background: '#ffffff',
-    border: '1px solid rgba(15, 23, 42, 0.08)',
-    borderRadius: '10px',
+    border: '1px solid rgba(15, 23, 42, 0.09)',
+    borderRadius: '12px',
     boxShadow: '0 2px 6px rgba(15, 23, 42, 0.02)',
     transition: 'var(--transition-smooth)',
+    flexShrink: 0,
+    width: '100%',
+    boxSizing: 'border-box',
   },
   ticketCardBody: {
     cursor: 'pointer',
   },
   ticketCardId: {
-    fontSize: '9px',
-    fontWeight: '700',
-    color: 'var(--text-secondary)',
-    opacity: 0.65,
+    fontSize: '10.5px',
+    fontWeight: '800',
+    color: '#64748b',
     fontFamily: 'monospace',
     whiteSpace: 'nowrap',
-    marginTop: '2px',
+    letterSpacing: '0.4px',
   },
   ticketTask: {
-    fontSize: '13px',
-    fontWeight: '600',
-    color: 'var(--text-primary)',
-    marginBottom: '8px',
-    lineHeight: '1.4',
+    fontSize: '14px',
+    fontWeight: '700',
+    color: '#0f172a',
+    margin: '4px 0 8px 0',
+    lineHeight: '1.35',
     wordBreak: 'break-word',
     width: '100%',
     display: 'block',
+    letterSpacing: '-0.2px',
   },
   tagRow: {
     display: 'flex',
@@ -3713,7 +3958,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1100,
+    zIndex: 9999,
   },
   modal: {
     width: '100%',

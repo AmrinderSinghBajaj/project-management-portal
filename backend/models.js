@@ -122,10 +122,30 @@ const TicketSchema = new mongoose.Schema({
     user: { type: String, required: true },
     action: { type: String, required: true }, // e.g., "Moved from 'To be started' to 'In progress'"
     timestamp: { type: Date, default: Date.now }
+  }],
+  firstViewedAt: { type: Date },
+  startedAt: { type: Date },
+  lastDeliveredAt: { type: Date },
+  resolutionSeconds: { type: Number, default: 0 },
+  timeTracking: [{
+    user: { type: String, required: true },
+    userEmail: { type: String },
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    totalSeconds: { type: Number, default: 0 },
+    lastActiveAt: { type: Date, default: Date.now },
+    sessionsCount: { type: Number, default: 1 }
   }]
 }, { timestamps: true });
 
 
+
+// Automatically retain only the last 4 history activities and hard delete older entries to save database storage
+TicketSchema.pre('save', function(next) {
+  if (this.history && this.history.length > 4) {
+    this.history = this.history.slice(-4);
+  }
+  next();
+});
 
 const User = mongoose.model('User', UserSchema);
 const Project = mongoose.model('Project', ProjectSchema);

@@ -461,7 +461,9 @@ export default function PMProjectsDashboard({
                               {teamMembers.map(member => {
                                 const memberName = member.name || member.email || 'Member';
                                 const memberRole = member.role || 'Member';
-                                const canInspect = ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO', 'Delivery Head'].includes(currentUser?.role);
+                                const roleLower = memberRole.toLowerCase();
+                                const isMemberExecutive = roleLower.includes('delivery head') || roleLower.includes('ceo');
+                                const canInspect = !isMemberExecutive && ['PM', 'Project Manager (PM)', 'PC', 'Project Coordinator (PC)', 'CEO', 'Delivery Head'].includes(currentUser?.role);
 
                                 return (
                                   <div 
@@ -539,6 +541,7 @@ export default function PMProjectsDashboard({
           userId={inspectedMember._id}
           userEmail={inspectedMember.email}
           userName={inspectedMember.name}
+          currentUser={currentUser}
           onClose={() => setInspectedMember(null)}
         />
       )}

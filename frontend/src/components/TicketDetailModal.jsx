@@ -11,6 +11,7 @@ import {
 } from '../utils/imageUtils';
 import ImageGalleryLightbox from './ImageGalleryLightbox';
 import VideoPromptModal from './VideoPromptModal';
+import CustomDateTimePicker from './CustomDateTimePicker';
 
 const ALL_TECH_TAGS = ['android', 'ios', 'backend', 'flutter', 'react', 'angular', 'python', 'design', 'qa', 'fullstack'];
 
@@ -108,6 +109,29 @@ const renderTextWithLinks = (text) => {
   });
 };
 
+const toDatetimeLocalString = (isoStr) => {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  if (isNaN(d.getTime())) return '';
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+};
+
+const formatDeadlineBadge = (dateStr) => {
+  if (!dateStr) return '';
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return '';
+  const today = new Date();
+  const isToday = d.toDateString() === today.toDateString();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const isTomorrow = d.toDateString() === tomorrow.toDateString();
+
+  const timeStr = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true });
+  if (isToday) return `Today, ${timeStr}`;
+  if (isTomorrow) return `Tomorrow, ${timeStr}`;
+  return `${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${timeStr}`;
+};
+
 export default function TicketDetailModal({ ticket, columns = [], currentUser, teamMembers = [], onClose, onRefresh }) {
   const [localTicket, setLocalTicket] = useState(ticket);
   const [newComment, setNewComment] = useState('');
@@ -128,7 +152,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
   const [editType, setEditType] = useState(ticket.ticketType || 'Task');
   const [editPriority, setEditPriority] = useState(ticket.priority || 'Medium');
   const [editFigma, setEditFigma] = useState(ticket.figmaRef || '');
-  const [editDeadline, setEditDeadline] = useState(ticket.deadline ? ticket.deadline.slice(0, 10) : '');
+  const [editDeadline, setEditDeadline] = useState(ticket.deadline ? toDatetimeLocalString(ticket.deadline) : '');
   const [editImages, setEditImages] = useState(ticket.images || []);
   const editImageFileInputRef = useRef(null);
   const [isEditDragOver, setIsEditDragOver] = useState(false);
@@ -150,6 +174,22 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
   const [replyingToCommentId, setReplyingToCommentId] = useState(null);
   const [replyText, setReplyText] = useState('');
 
+  // Register ticket view on open (for smart lifecycle resolution tracking)
+  useEffect(() => {
+    if (!ticket?._id || !currentUser?.name) return;
+
+    fetch(`${API_BASE}/telemetry/heartbeat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        t: ticket._id,
+        n: currentUser.name,
+        e: currentUser.email || null,
+        u: currentUser._id || null
+      })
+    }).catch(() => {});
+  }, [ticket?._id, currentUser?.name]);
+
   useEffect(() => {
     setLocalTicket(ticket);
     setEditTask(ticket.task || '');
@@ -157,7 +197,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
     setEditType(ticket.ticketType || 'Task');
     setEditPriority(ticket.priority || 'Medium');
     setEditFigma(ticket.figmaRef || '');
-    setEditDeadline(ticket.deadline ? ticket.deadline.slice(0, 10) : '');
+    setEditDeadline(ticket.deadline ? toDatetimeLocalString(ticket.deadline) : '');
     setEditImages(ticket.images || []);
   }, [ticket]);
 
@@ -250,6 +290,8 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
         body: JSON.stringify({ 
           status: newStatus,
           userName: currentUser.name,
+          userEmail: currentUser.email,
+          userId: currentUser._id,
           userRole: currentUser.role
         })
       });
@@ -491,6 +533,13 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
       alert('Task title cannot be empty.');
       return;
     }
+    if (editDeadline) {
+      const deadlineTime = new Date(editDeadline).getTime();
+      if (!isNaN(deadlineTime) && deadlineTime < Date.now()) {
+        alert('Invalid Deadline: The deadline cannot be set in the past. Please select a future date and time.');
+        return;
+      }
+    }
     try {
       const existingPaths = editImages.filter(item => typeof item === 'string');
       const newItems = editImages.filter(item => typeof item !== 'string' && item.file);
@@ -633,7 +682,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                   setEditType(localTicket.ticketType || 'Task');
                   setEditPriority(localTicket.priority || 'Medium');
                   setEditFigma(localTicket.figmaRef || '');
-                  setEditDeadline(localTicket.deadline ? localTicket.deadline.slice(0, 10) : '');
+                  setEditDeadline(localTicket.deadline ? toDatetimeLocalString(localTicket.deadline) : '');
                   setIsEditing(true);
                 }}
                 title="Edit Ticket Details"
@@ -694,7 +743,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                   />
                 </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '10px' }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1.2fr', gap: '10px', alignItems: 'flex-start' }}>
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
                     <label style={styles.formLabel}>Type</label>
                     <select
@@ -722,12 +771,12 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
                   </div>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    <label style={styles.formLabel}>Deadline</label>
-                    <input
-                      type="date"
+                    <label style={styles.formLabel}>Timeline</label>
+                    <CustomDateTimePicker
                       value={editDeadline}
-                      onChange={(e) => setEditDeadline(e.target.value)}
-                      style={styles.editInput}
+                      onChange={(val) => setEditDeadline(val)}
+                      placeholder="Select date & time"
+                      align="right"
                     />
                   </div>
                 </div>
@@ -1717,9 +1766,31 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
 
             <div style={styles.sidebarSection}>
               <label style={styles.sidebarLabel}>DEADLINE</label>
-              <div style={styles.sidebarValue}>
-                {localTicket.deadline ? formatDate(localTicket.deadline) : 'No deadline set'}
-              </div>
+              {localTicket.deadline ? (
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  padding: '8px 12px',
+                  backgroundColor: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  borderRadius: '8px'
+                }}>
+                  <span style={{ fontSize: '15px' }}>⏰</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '1px' }}>
+                    <span style={{ fontSize: '12.5px', fontWeight: '700', color: '#0f172a' }}>
+                      {formatDeadlineBadge(localTicket.deadline)}
+                    </span>
+                    <span style={{ fontSize: '11px', color: '#64748b' }}>
+                      {formatDate(localTicket.deadline)} at {formatTime(localTicket.deadline)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ ...styles.sidebarValue, color: '#94a3b8', fontStyle: 'italic' }}>
+                  No deadline set
+                </div>
+              )}
             </div>
 
             <div style={styles.sidebarSection}>
@@ -1735,7 +1806,7 @@ export default function TicketDetailModal({ ticket, columns = [], currentUser, t
               {showActivity && (
                 <div style={styles.historyList}>
                   {localTicket.history && localTicket.history.length > 0 ? (
-                    localTicket.history.map((log, idx) => (
+                    localTicket.history.slice(-4).slice().reverse().map((log, idx) => (
                       <div key={idx} style={styles.historyItem}>
                         <div style={styles.historyDot} />
                         <div style={styles.historyDetails}>
@@ -1787,7 +1858,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1000,
+    zIndex: 9999,
   },
   modal: {
     width: '100%',
@@ -1856,8 +1927,8 @@ const styles = {
   },
   grid: {
     display: 'grid',
-    gridTemplateColumns: 'minmax(0, 1fr) 280px',
-    gap: '24px',
+    gridTemplateColumns: 'minmax(0, 1fr) 210px',
+    gap: '20px',
     overflow: 'hidden',
     height: '100%',
     minWidth: 0,
@@ -1876,9 +1947,9 @@ const styles = {
   rightCol: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '16px',
+    gap: '13px',
     borderLeft: '1px solid var(--panel-border)',
-    paddingLeft: '18px',
+    paddingLeft: '16px',
     overflowY: 'auto',
     maxHeight: '74vh',
   },
@@ -1892,22 +1963,22 @@ const styles = {
   sidebarSection: {
     display: 'flex',
     flexDirection: 'column',
-    gap: '6px',
+    gap: '5px',
     position: 'relative',
   },
   sidebarLabel: {
-    fontSize: '10px',
+    fontSize: '9.5px',
     fontWeight: '700',
     color: 'var(--text-secondary)',
-    letterSpacing: '0.8px',
+    letterSpacing: '0.6px',
   },
   sidebarValue: {
-    fontSize: '14px',
+    fontSize: '13px',
     fontWeight: '600',
     color: 'var(--text-primary)',
   },
   statusTrigger: {
-    padding: '10px 14px',
+    padding: '8px 12px',
     background: 'rgba(15, 23, 42, 0.03)',
     border: '1px solid rgba(15, 23, 42, 0.08)',
     borderRadius: '8px',
@@ -1915,11 +1986,11 @@ const styles = {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    fontSize: '13px',
+    fontSize: '12.5px',
     fontWeight: '600',
     color: 'var(--text-primary)',
     transition: 'var(--transition-smooth)',
-    marginTop: '6px',
+    marginTop: '4px',
     position: 'relative',
     userSelect: 'none',
   },

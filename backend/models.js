@@ -13,7 +13,7 @@ const UserSchema = new mongoose.Schema({
       'BA', 'Business Analyst (BA)', 'Developer', 'QA', 'Quality Analyst (QA)', 
       'Designer', 'Sales', 'Sales Rep', 'Android Developer', 'iOS Developer', 
       'Flutter Developer', 'Python Developer', 'Full Stack Developer', 
-      'Angular Developer', 'Frontend Designer', 'Backend Developer', 'Delivery Head',
+      'Angular Developer', 'React Developer', 'Frontend Designer', 'Backend Developer', 'Delivery Head',
       'Product Owner', 'Client'
     ]
   },

@@ -327,8 +327,8 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
     reopened: 'Total Reopened',
     reopenedRate: 'Reopened Tickets',
     missedDeadlines: 'Tickets Missed Deadline',
-    timeSpent: 'Top 5 Longest Resolution Tickets',
-    avgTime: 'Top 5 Longest Resolution Tickets',
+    timeSpent: isQA ? 'Top 5 Longest QA Testing & Verification Tickets' : 'Top 5 Longest Resolution Tickets',
+    avgTime: isQA ? 'Top 5 Longest QA Testing & Verification Tickets' : 'Top 5 Longest Resolution Tickets',
     pmTickets: 'Tickets Created by PM',
     pmProjects: 'Managed Projects Portfolio',
     qaTested: 'Tested & Delivered Tickets',
@@ -854,7 +854,9 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
                     </div>
                     <div style={styles.inspectorSub}>
                       {activeCard === 'timeSpent' || activeCard === 'avgTime'
-                        ? `Showing top ${filteredList.length} ticket(s) that took the most dev time`
+                        ? isQA 
+                          ? `Showing top ${filteredList.length} ticket(s) that took the most QA testing & verification time`
+                          : `Showing top ${filteredList.length} ticket(s) that took the most dev time`
                         : `Showing ${filteredList.length} record(s) for this metric`
                       }
                     </div>

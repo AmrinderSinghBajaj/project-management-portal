@@ -328,7 +328,7 @@ function RoleMultiSelect({ role, availableUsers = [], selectedIds = [], onChange
 
 const ROLES_LIST = [
   'Android Developer', 'iOS Developer', 'Flutter Developer', 'Python Developer',
-  'Full Stack Developer', 'Angular Developer', 'Frontend Designer', 'Backend Developer',
+  'Full Stack Developer', 'React Developer', 'Angular Developer', 'Frontend Designer', 'Backend Developer',
   'Delivery Head', 'QA', 'BA', 'PC', 'Sales', 'PM', 'CEO', 'Developer', 'Designer', 'Product Owner'
 ];
 

@@ -10,6 +10,7 @@ const rolesList = [
   { value: 'BA', label: 'Business Analyst (BA)' },
   { value: 'Developer', label: 'Developer (General)' },
   { value: 'Full Stack Developer', label: 'Full Stack Developer' },
+  { value: 'React Developer', label: 'React Developer' },
   { value: 'Backend Developer', label: 'Backend Developer' },
   { value: 'Angular Developer', label: 'Angular Developer' },
   { value: 'Android Developer', label: 'Android Developer' },

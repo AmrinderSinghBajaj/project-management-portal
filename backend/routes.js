@@ -2157,6 +2157,74 @@ router.get('/users/:id/performance', async (req, res) => {
       t.status?.toLowerCase() === 'in progress' && (devTag ? t.tags?.some(tag => tag.toLowerCase() === devTag) : true)
     ).length;
 
+    // --- QA Testing Turnaround Time Tracking ---
+    const isQAPerson = (userRole || '').toLowerCase().includes('qa') || 
+                       (userRole || '').toLowerCase().includes('quality') || 
+                       (userRole || '').toLowerCase().includes('tester');
+
+    let qaTotalTimeSpentSeconds = 0;
+    let qaTrackedCount = 0;
+    const qaTicketsTimeBreakdown = [];
+
+    qaTestedTicketsList.forEach(item => {
+      const ticket = tickets.find(t => t._id.toString() === item.ticketId.toString());
+      if (ticket) {
+        let qaSeconds = 0;
+        const matchingTrack = (ticket.timeTracking || []).find(tt => 
+          (user._id && tt.userId && tt.userId.toString() === user._id.toString()) ||
+          matchesUser(tt.user) || 
+          matchesUser(tt.userEmail)
+        );
+        if (matchingTrack && matchingTrack.totalSeconds > 0) {
+          qaSeconds = matchingTrack.totalSeconds;
+        } else {
+          // Lifecycle duration: From when ticket entered 'Ready for testing' until QA tested it
+          const history = ticket.history || [];
+          let readyForTestingTime = null;
+          const testedTime = new Date(item.testedAt).getTime();
+          for (let i = history.length - 1; i >= 0; i--) {
+            const h = history[i];
+            const act = (h.action || '').toLowerCase();
+            const hTime = new Date(h.timestamp).getTime();
+            if (hTime <= testedTime && act.includes("to 'ready for testing'")) {
+              readyForTestingTime = hTime;
+              break;
+            }
+          }
+          if (readyForTestingTime && testedTime > readyForTestingTime) {
+            qaSeconds = Math.max(60, Math.round((testedTime - readyForTestingTime) / 1000));
+          } else {
+            qaSeconds = 600; // 10 min standard testing cycle
+          }
+        }
+
+        if (qaSeconds > 0) {
+          qaTotalTimeSpentSeconds += qaSeconds;
+          qaTrackedCount++;
+          qaTicketsTimeBreakdown.push({
+            ticketId: ticket._id,
+            task: ticket.task,
+            ticketType: ticket.ticketType || 'Task',
+            priority: ticket.priority || 'Medium',
+            projectName: ticket.project?.name || 'Project',
+            status: ticket.status,
+            deadline: ticket.deadline,
+            totalSeconds: qaSeconds,
+            formattedTime: formatDuration(qaSeconds),
+            lastActiveAt: item.testedAt || new Date()
+          });
+        }
+      }
+    });
+
+    qaTicketsTimeBreakdown.sort((a, b) => (b.totalSeconds || 0) - (a.totalSeconds || 0));
+
+    const qaAvgTimePerTicketSeconds = qaTrackedCount > 0 
+      ? Math.round(qaTotalTimeSpentSeconds / qaTrackedCount) 
+      : 0;
+    const qaFormattedAvgTime = qaTrackedCount > 0 ? formatDuration(qaAvgTimePerTicketSeconds) : '0m';
+    const qaFormattedTotalTime = qaTrackedCount > 0 ? formatDuration(qaTotalTimeSpentSeconds) : '0m';
+
     // Construct Scorecard Object (Sanitize Time Fields for Non-Executives)
     const scorecardDetails = {
       allocated: allocatedTicketsList,
@@ -2165,7 +2233,7 @@ router.get('/users/:id/performance', async (req, res) => {
       missedDeadlines: missedDeadlineTicketsList
     };
     if (isDeliveryOrCeo) {
-      scorecardDetails.timeSpent = ticketsTimeBreakdown;
+      scorecardDetails.timeSpent = isQAPerson ? qaTicketsTimeBreakdown : ticketsTimeBreakdown;
     }
 
     const scorecardObj = {
@@ -2180,10 +2248,17 @@ router.get('/users/:id/performance', async (req, res) => {
     };
 
     if (isDeliveryOrCeo) {
-      scorecardObj.totalTimeSpentSeconds = totalTimeSpentSeconds;
-      scorecardObj.formattedTotalTime = formattedTotalTime;
-      scorecardObj.avgTimePerTicketSeconds = avgTimePerTicketSeconds;
-      scorecardObj.formattedAvgTime = formattedAvgTime;
+      if (isQAPerson) {
+        scorecardObj.totalTimeSpentSeconds = qaTotalTimeSpentSeconds;
+        scorecardObj.formattedTotalTime = qaFormattedTotalTime;
+        scorecardObj.avgTimePerTicketSeconds = qaAvgTimePerTicketSeconds;
+        scorecardObj.formattedAvgTime = qaFormattedAvgTime;
+      } else {
+        scorecardObj.totalTimeSpentSeconds = totalTimeSpentSeconds;
+        scorecardObj.formattedTotalTime = formattedTotalTime;
+        scorecardObj.avgTimePerTicketSeconds = avgTimePerTicketSeconds;
+        scorecardObj.formattedAvgTime = formattedAvgTime;
+      }
     }
 
     // Construct Developer Metrics Object
@@ -2225,11 +2300,11 @@ router.get('/users/:id/performance', async (req, res) => {
     };
 
     if (isDeliveryOrCeo) {
-      qaObj.formattedAvgTime = formattedAvgTime;
-      qaObj.avgTimePerTicketSeconds = avgTimePerTicketSeconds;
-      qaObj.totalTimeSpentSeconds = totalTimeSpentSeconds;
-      qaObj.formattedTotalTime = formattedTotalTime;
-      qaObj.ticketsTimeBreakdown = ticketsTimeBreakdown;
+      qaObj.formattedAvgTime = qaFormattedAvgTime;
+      qaObj.avgTimePerTicketSeconds = qaAvgTimePerTicketSeconds;
+      qaObj.totalTimeSpentSeconds = qaTotalTimeSpentSeconds;
+      qaObj.formattedTotalTime = qaFormattedTotalTime;
+      qaObj.ticketsTimeBreakdown = qaTicketsTimeBreakdown;
     }
 
     res.json({

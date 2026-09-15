@@ -1512,6 +1512,49 @@ router.post('/tickets/:id/comments/:commentId/react', async (req, res) => {
 router.get('/users/:id/performance', async (req, res) => {
   try {
     const { id } = req.params;
+
+    // Verify whether the requester is Delivery Head or CEO
+    let isDeliveryOrCeo = false;
+
+    // 1. Check Authorization Bearer JWT if present
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+    if (token) {
+      try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        if (decoded && decoded.id) {
+          const reqUser = await User.findById(decoded.id);
+          if (reqUser && reqUser.role) {
+            const r = reqUser.role.toLowerCase();
+            if (r.includes('delivery') || r.includes('ceo')) {
+              isDeliveryOrCeo = true;
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // 2. Check requesterEmail from header or query param
+    const requesterEmail = req.headers['x-requester-email'] || req.query.requesterEmail;
+    if (!isDeliveryOrCeo && requesterEmail) {
+      const reqUser = await User.findOne({ email: new RegExp(`^${String(requesterEmail).trim()}$`, 'i') });
+      if (reqUser && reqUser.role) {
+        const r = reqUser.role.toLowerCase();
+        if (r.includes('delivery') || r.includes('ceo')) {
+          isDeliveryOrCeo = true;
+        }
+      }
+    }
+
+    // 3. Fallback check for requesterRole header or query
+    const requesterRole = req.headers['x-requester-role'] || req.query.requesterRole;
+    if (!isDeliveryOrCeo && requesterRole) {
+      const r = String(requesterRole).trim().toLowerCase();
+      if (r.includes('delivery') || r.includes('ceo')) {
+        isDeliveryOrCeo = true;
+      }
+    }
+
     let user = null;
 
     if (mongoose.Types.ObjectId.isValid(id)) {
@@ -2114,6 +2157,81 @@ router.get('/users/:id/performance', async (req, res) => {
       t.status?.toLowerCase() === 'in progress' && (devTag ? t.tags?.some(tag => tag.toLowerCase() === devTag) : true)
     ).length;
 
+    // Construct Scorecard Object (Sanitize Time Fields for Non-Executives)
+    const scorecardDetails = {
+      allocated: allocatedTicketsList,
+      resolved: resolvedTicketsList,
+      reopened: reopenedTicketsList,
+      missedDeadlines: missedDeadlineTicketsList
+    };
+    if (isDeliveryOrCeo) {
+      scorecardDetails.timeSpent = ticketsTimeBreakdown;
+    }
+
+    const scorecardObj = {
+      totalAllocated,
+      totalResolved,
+      totalReopened,
+      totalMissedDeadlines,
+      totalDeadlinesCount,
+      onTimePercentage,
+      reopenedPercentage,
+      details: scorecardDetails
+    };
+
+    if (isDeliveryOrCeo) {
+      scorecardObj.totalTimeSpentSeconds = totalTimeSpentSeconds;
+      scorecardObj.formattedTotalTime = formattedTotalTime;
+      scorecardObj.avgTimePerTicketSeconds = avgTimePerTicketSeconds;
+      scorecardObj.formattedAvgTime = formattedAvgTime;
+    }
+
+    // Construct Developer Metrics Object
+    const developerObj = {
+      deliveredCount,
+      reopenedCount: totalReopened,
+      passRatePercent: devPassRate,
+      activeTicketsCount
+    };
+
+    if (isDeliveryOrCeo) {
+      developerObj.totalTimeSpentSeconds = totalTimeSpentSeconds;
+      developerObj.formattedTotalTime = formattedTotalTime;
+      developerObj.avgTimePerTicketSeconds = avgTimePerTicketSeconds;
+      developerObj.formattedAvgTime = formattedAvgTime;
+      developerObj.trackedTicketsCount = trackedTicketsCount;
+      developerObj.ticketsTimeBreakdown = ticketsTimeBreakdown;
+    }
+
+    // Construct QA Metrics Object
+    const qaObj = {
+      score: qaPerformanceScore,
+      defectCatchingRate: qaDefectCatchingRate,
+      signOffAccuracy: qaSignOffAccuracy,
+      testingVelocity: qaTestingVelocity,
+      testedCount: qaTestedCount,
+      bugsCaughtCount: qaBugsCaughtCount,
+      sentBackCount: qaSentBackCount,
+      leakedBugsCount: qaLeakedBugsCount,
+      postReleaseReopensCount: qaPostReleaseReopensCount,
+      readyQueueCount: qaReadyQueueCount,
+      details: {
+        tested: qaTestedTicketsList,
+        bugsCaught: qaBugsCaughtList,
+        sentBack: qaSentBackList,
+        leakedBugs: qaLeakedBugsList,
+        postReleaseReopens: qaPostReleaseReopensList
+      }
+    };
+
+    if (isDeliveryOrCeo) {
+      qaObj.formattedAvgTime = formattedAvgTime;
+      qaObj.avgTimePerTicketSeconds = avgTimePerTicketSeconds;
+      qaObj.totalTimeSpentSeconds = totalTimeSpentSeconds;
+      qaObj.formattedTotalTime = formattedTotalTime;
+      qaObj.ticketsTimeBreakdown = ticketsTimeBreakdown;
+    }
+
     res.json({
       user: {
         _id: user._id,
@@ -2122,57 +2240,9 @@ router.get('/users/:id/performance', async (req, res) => {
         role: user.role
       },
       metrics: {
-        scorecard: {
-          totalAllocated,
-          totalResolved,
-          totalReopened,
-          totalMissedDeadlines,
-          totalDeadlinesCount,
-          totalTimeSpentSeconds,
-          formattedTotalTime,
-          avgTimePerTicketSeconds,
-          formattedAvgTime,
-          onTimePercentage,
-          reopenedPercentage,
-          details: {
-            allocated: allocatedTicketsList,
-            resolved: resolvedTicketsList,
-            reopened: reopenedTicketsList,
-            missedDeadlines: missedDeadlineTicketsList,
-            timeSpent: ticketsTimeBreakdown
-          }
-        },
-        developer: {
-          deliveredCount,
-          reopenedCount: totalReopened,
-          passRatePercent: devPassRate,
-          activeTicketsCount,
-          totalTimeSpentSeconds,
-          formattedTotalTime,
-          avgTimePerTicketSeconds,
-          formattedAvgTime,
-          trackedTicketsCount,
-          ticketsTimeBreakdown
-        },
-        qa: {
-          score: qaPerformanceScore,
-          defectCatchingRate: qaDefectCatchingRate,
-          signOffAccuracy: qaSignOffAccuracy,
-          testingVelocity: qaTestingVelocity,
-          testedCount: qaTestedCount,
-          bugsCaughtCount: qaBugsCaughtCount,
-          sentBackCount: qaSentBackCount,
-          leakedBugsCount: qaLeakedBugsCount,
-          postReleaseReopensCount: qaPostReleaseReopensCount,
-          readyQueueCount: qaReadyQueueCount,
-          details: {
-            tested: qaTestedTicketsList,
-            bugsCaught: qaBugsCaughtList,
-            sentBack: qaSentBackList,
-            leakedBugs: qaLeakedBugsList,
-            postReleaseReopens: qaPostReleaseReopensList
-          }
-        },
+        scorecard: scorecardObj,
+        developer: developerObj,
+        qa: qaObj,
         manager: {
           ticketsCreatedCount: pmCreatedTicketsList.length,
           totalRevenueGenerated,

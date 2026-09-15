@@ -44,7 +44,32 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
         const identifier = userId || userEmail || userName;
         if (!identifier) throw new Error('No user identifier provided.');
 
-        const res = await fetch(`${API_BASE}/users/${encodeURIComponent(identifier)}/performance`);
+        const token = localStorage.getItem('pm_token') || localStorage.getItem('token');
+        const auth = currentUser || (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('pm_user') || localStorage.getItem('user') || '{}') : {});
+        const reqEmail = auth?.email || '';
+        const reqRole = auth?.role || '';
+
+        const headers = {
+          'Content-Type': 'application/json'
+        };
+        if (token) {
+          headers['Authorization'] = `Bearer ${token}`;
+        }
+        if (reqEmail) {
+          headers['x-requester-email'] = reqEmail;
+        }
+        if (reqRole) {
+          headers['x-requester-role'] = reqRole;
+        }
+
+        const queryParams = new URLSearchParams();
+        if (reqEmail) queryParams.append('requesterEmail', reqEmail);
+        if (reqRole) queryParams.append('requesterRole', reqRole);
+
+        const queryString = queryParams.toString();
+        const url = `${API_BASE}/users/${encodeURIComponent(identifier)}/performance${queryString ? `?${queryString}` : ''}`;
+
+        const res = await fetch(url, { headers });
         if (!res.ok) {
           const errData = await res.json();
           throw new Error(errData.error || 'Failed to load performance scorecard.');
@@ -59,7 +84,7 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
     };
 
     fetchPerformance();
-  }, [userId, userEmail, userName]);
+  }, [userId, userEmail, userName, currentUser]);
 
   // Reset page & filters when active card changes
   useEffect(() => {
@@ -71,7 +96,10 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
   const member = data?.user || { name: userName, email: userEmail, role: 'Member' };
   const isPM = isPMRole(member.role);
   const isQA = isQARole(member.role);
-  const isDeliveryHead = Boolean(currentUser && (currentUser.role?.toLowerCase().includes('delivery') || currentUser.role?.toLowerCase().includes('ceo')));
+  const authUser = currentUser || (typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('pm_user') || localStorage.getItem('user') || '{}') : {});
+  const userRole = (authUser?.role || '').toLowerCase();
+  const canViewAvgTime = Boolean(userRole.includes('delivery') || userRole.includes('ceo'));
+  const isDeliveryHead = canViewAvgTime;
   const metrics = data?.metrics || {};
 
   const managerMetrics = metrics.manager || {
@@ -242,6 +270,7 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
         return details.missedDeadlines || [];
       case 'timeSpent':
       case 'avgTime': {
+        if (!canViewAvgTime) return [];
         const list = [...(details.timeSpent || [])];
         list.sort((a, b) => (b.totalSeconds || 0) - (a.totalSeconds || 0));
         return list.slice(0, 5);
@@ -250,7 +279,7 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
       default:
         return details.allocated || [];
     }
-  }, [activeCard, isPM, isQA, details, managerMetrics, qaDetails]);
+  }, [activeCard, isPM, isQA, canViewAvgTime, details, managerMetrics, qaDetails]);
 
   // Extract all unique project names for dropdown
   const projectOptions = useMemo(() => {
@@ -536,8 +565,8 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
                 </div>
               </div>
             ) : isQA ? (
-              /* QA HERO CARDS (5 CARDS) */
-              <div style={styles.heroGridQA}>
+              /* QA HERO CARDS (5 CARDS, 6 FOR DELIVERY HEAD / CEO) */
+              <div style={{ ...styles.heroGridQA, gridTemplateColumns: canViewAvgTime ? 'repeat(6, 1fr)' : 'repeat(5, 1fr)' }}>
                 {/* QA Card 1: Tested & Delivered */}
                 <div 
                   style={{ 
@@ -647,11 +676,35 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
                     {qaMetrics.postReleaseReopensCount || 0}
                   </div>
                 </div>
+
+                {/* QA Card 6: Average Time / Ticket (Strictly Delivery Head / CEO only) */}
+                {canViewAvgTime && (
+                  <div 
+                    style={{ 
+                      ...styles.heroCard, 
+                      borderColor: activeCard === 'timeSpent' ? '#1e3a8a' : '#bae6fd',
+                      backgroundColor: activeCard === 'timeSpent' ? '#eff6ff' : '#ffffff',
+                      boxShadow: activeCard === 'timeSpent' ? '0 4px 14px rgba(30, 58, 138, 0.2)' : styles.heroCard.boxShadow,
+                      transform: activeCard === 'timeSpent' ? 'translateY(-2px)' : 'none'
+                    }}
+                    onClick={() => handleCardClick('timeSpent')}
+                    className="interactive-metric-card"
+                    title="Click to view QA testing & resolution time log"
+                  >
+                    <div style={styles.heroTitleRow}>
+                      <span style={styles.heroTitle}>AVG TIME / TICKET</span>
+                      <span style={styles.cardClickHint}>{activeCard === 'timeSpent' ? '▲' : '▼'}</span>
+                    </div>
+                    <div style={{ ...styles.heroMainValue, color: '#1e3a8a', fontSize: '24px' }}>
+                      {scorecard.formattedAvgTime || metrics.developer?.formattedAvgTime || '0m'}
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
-              /* DEVELOPER HERO CARDS (6 CARDS ALL UNIFORM BLUE) */
+              /* DEVELOPER HERO CARDS (5 CARDS, 6 FOR DELIVERY HEAD / CEO) */
               <>
-                <div style={styles.heroGridDev}>
+                <div style={{ ...styles.heroGridDev, gridTemplateColumns: canViewAvgTime ? 'repeat(6, 1fr)' : 'repeat(5, 1fr)' }}>
                   {/* Dev Card 1: Tickets Received */}
                   <div 
                     style={{ 
@@ -762,27 +815,29 @@ export default function UserPerformanceModal({ userId, userEmail, userName, curr
                     </div>
                   </div>
 
-                  {/* Dev Card 6: Average Time / Ticket */}
-                  <div 
-                    style={{ 
-                      ...styles.heroCard, 
-                      borderColor: activeCard === 'timeSpent' ? '#1e3a8a' : '#bae6fd',
-                      backgroundColor: activeCard === 'timeSpent' ? '#eff6ff' : '#ffffff',
-                      boxShadow: activeCard === 'timeSpent' ? '0 4px 14px rgba(30, 58, 138, 0.2)' : styles.heroCard.boxShadow,
-                      transform: activeCard === 'timeSpent' ? 'translateY(-2px)' : 'none'
-                    }}
-                    onClick={() => handleCardClick('timeSpent')}
-                    className="interactive-metric-card"
-                    title="Click to view development resolution time & session log"
-                  >
-                    <div style={styles.heroTitleRow}>
-                      <span style={styles.heroTitle}>AVG TIME / TICKET</span>
-                      <span style={styles.cardClickHint}>{activeCard === 'timeSpent' ? '▲' : '▼'}</span>
+                  {/* Dev Card 6: Average Time / Ticket (Strictly Delivery Head / CEO only) */}
+                  {canViewAvgTime && (
+                    <div 
+                      style={{ 
+                        ...styles.heroCard, 
+                        borderColor: activeCard === 'timeSpent' ? '#1e3a8a' : '#bae6fd',
+                        backgroundColor: activeCard === 'timeSpent' ? '#eff6ff' : '#ffffff',
+                        boxShadow: activeCard === 'timeSpent' ? '0 4px 14px rgba(30, 58, 138, 0.2)' : styles.heroCard.boxShadow,
+                        transform: activeCard === 'timeSpent' ? 'translateY(-2px)' : 'none'
+                      }}
+                      onClick={() => handleCardClick('timeSpent')}
+                      className="interactive-metric-card"
+                      title="Click to view development resolution time & session log"
+                    >
+                      <div style={styles.heroTitleRow}>
+                        <span style={styles.heroTitle}>AVG TIME / TICKET</span>
+                        <span style={styles.cardClickHint}>{activeCard === 'timeSpent' ? '▲' : '▼'}</span>
+                      </div>
+                      <div style={{ ...styles.heroMainValue, color: '#1e3a8a', fontSize: '24px' }}>
+                        {scorecard.formattedAvgTime || metrics.developer?.formattedAvgTime || '0m'}
+                      </div>
                     </div>
-                    <div style={{ ...styles.heroMainValue, color: '#1e3a8a', fontSize: '24px' }}>
-                      {scorecard.formattedAvgTime || metrics.developer?.formattedAvgTime || '0m'}
-                    </div>
-                  </div>
+                  )}
                 </div>
               </>
             )}

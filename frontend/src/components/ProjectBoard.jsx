@@ -1833,35 +1833,23 @@ export default function ProjectBoard({
                           title={urgency.tooltip || ''}
                         >
                           <div onClick={() => onSelectTicket(ticket)} style={styles.ticketCardBody}>
-                            {/* Top Row: Ticket ID (Left) & Priority Dot (Right) */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '4px' }}>
+                            {/* Top Row: Ticket ID */}
+                            <div style={{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
                               <span style={styles.ticketCardId}>#{ticket._id.slice(-6).toUpperCase()}</span>
-                              <span 
-                                title={`Priority: ${ticket.priority || 'Medium'}`}
-                                style={{
-                                  width: '8px',
-                                  height: '8px',
-                                  borderRadius: '50%',
-                                  backgroundColor: getPriorityDotColor(ticket.priority),
-                                  display: 'inline-block',
-                                  flexShrink: 0,
-                                }}
-                              />
                             </div>
 
                             {/* Primary Prominent Ticket Title */}
                             <h4 style={styles.ticketTask}>{ticket.task}</h4>
 
-                            {/* Bottom Row: Tech Team Tag (Left Bottom) & Type Tag (Right Bottom) */}
+                            {/* Bottom Row: Tech Team Tag(s) (Left) & Type Icon (Right - Exact same vertical line as Priority Dot) */}
                             <div style={{ 
                               display: 'flex', 
                               justifyContent: 'space-between', 
                               alignItems: 'center', 
                               marginTop: '6px', 
-                              gap: '6px'
+                              gap: '6px' 
                             }}>
-                              {/* Left Bottom: Tech Team Tag(s) & Client Badge */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', flexWrap: 'wrap', minHeight: '18px' }}>
                                 {Boolean(ticket.isClientTicket || ticket.reportedByRole === 'Client') && (
                                   <span style={{
                                     fontSize: '9.5px',
@@ -1891,27 +1879,28 @@ export default function ProjectBoard({
                                 })}
                               </div>
 
-                              {/* Right Bottom: Bug / Task / Feature Type Icon Only */}
-                              {(() => {
-                                const typeStyle = getTicketTypeStyle(ticket.ticketType);
-                                return (
-                                  <span 
-                                    style={{
-                                      fontSize: '13px',
-                                      lineHeight: 1,
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      justifyContent: 'center',
-                                      flexShrink: 0,
-                                      opacity: 0.9,
-                                      cursor: 'default'
-                                    }}
-                                    title={`Type: ${ticket.ticketType || 'Task'}`}
-                                  >
-                                    {typeStyle.icon}
-                                  </span>
-                                );
-                              })()}
+                              {/* Right Bottom: Bug / Task / Feature Type Icon in exact same vertical line */}
+                              <div style={{ width: '16px', height: '16px', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                                {(() => {
+                                  const typeStyle = getTicketTypeStyle(ticket.ticketType);
+                                  return (
+                                    <span 
+                                      style={{
+                                        fontSize: '13px',
+                                        lineHeight: 1,
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'center',
+                                        opacity: 0.9,
+                                        cursor: 'default'
+                                      }}
+                                      title={`Type: ${ticket.ticketType || 'Task'}`}
+                                    >
+                                      {typeStyle.icon}
+                                    </span>
+                                  );
+                                })()}
+                              </div>
                             </div>
                           </div>
                         </div>
